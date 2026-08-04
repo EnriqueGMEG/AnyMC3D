@@ -1,186 +1,224 @@
-"""
-AnyMC3D Training Script — Hydra config driven
+"""Hydra-driven fold training for both legacy and pancreas AnyMC3D models."""
 
-Augmentation is decoupled from data loading:
-    get_datamodule(cfg, fold)  -> instantiates the data module via Hydra
-    attach_augmentation(dm, …) -> transforms attached afterward
+from __future__ import annotations
 
-Layout:
-    data_modules/pdcad_dataset.py       — PDCADDataModule
-    data_modules/data_augmentation.py   — apply_augmentation, TransformedDataset
-    model/anymc3d.py                    — AnyMC3DLightningModule
-
-Usage:
-    export CUDA_VISIBLE_DEVICES=3
-    python train.py                                  # defaults (data=pdcad, model=anymc3d)
-    python train.py data=pdcad model=anymc3d         # explicit
-    python train.py data=meningioma_t1c              # swap data
-    python train.py data.module.batch_size=4         # override a module kwarg
-    python train.py 'data.module.fold=[0,1,2]'       # multi-fold
-"""
-
-import hydra
-from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf, ListConfig
-import torch
-import lightning as L
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
-from lightning.pytorch.loggers import WandbLogger
-import wandb
+import json
 from pathlib import Path
 
+import hydra
+import lightning as L
+from hydra.utils import instantiate
+from lightning.pytorch.callbacks import (
+    EarlyStopping,
+    LearningRateMonitor,
+    ModelCheckpoint,
+)
+from lightning.pytorch.loggers import CSVLogger
+from omegaconf import DictConfig, ListConfig, OmegaConf
+import torch
 
-def get_datamodule(cfg, fold: int):
-    """
-    Build the raw data module — no augmentation attached here.
+from training_callbacks import EpochMetricsHistory
 
-    For pdcad, the data module is instantiated directly from the config via
-    hydra.utils.instantiate, using cfg.data.module (which carries _target_
-    plus the constructor kwargs). The `fold` kwarg is passed as an explicit
-    override so multi-fold loops pick up the current iteration's fold.
-    """
+
+def metric_mode(metric: str) -> str:
+    """Infer checkpoint direction without hardcoding one particular metric."""
+
+    return "min" if "loss" in metric.lower() else "max"
+
+
+def snapshot_checkpoint_summary(metrics, callbacks) -> dict[str, dict]:
+    """Freeze best paths/scores before checkpoint-based validation restores state."""
+
+    summary = {}
+    for metric, callback in zip(metrics, callbacks):
+        score = callback.best_model_score
+        summary[str(metric)] = {
+            "path": str(callback.best_model_path),
+            "score": None if score is None else float(score),
+        }
+    return summary
+
+
+def resolve_folds(cfg: DictConfig) -> list[int]:
+    fold_value = cfg.data.get("fold", cfg.data.module.get("fold", 0))
+    if isinstance(fold_value, (list, ListConfig)):
+        return [int(value) for value in fold_value]
+    return [int(fold_value)]
+
+
+def get_datamodule(cfg: DictConfig, fold: int):
     return instantiate(cfg.data.module, fold=fold)
 
 
-def attach_augmentation(dm, cfg):
-    """
-    Attach train/eval transforms to the data module *after* construction.
+def attach_legacy_augmentation(datamodule, cfg: DictConfig):
+    """Retain the old Dataset behavior without affecting the new DataModule."""
 
-    Reads cfg.data.augment (the flag, at the data-group level) — NOT
-    cfg.data.module.augment, because `augment` isn't a PDCADDataModule
-    constructor argument.
-    """
-    from data_modules.data_augmentation import apply_augmentation
-    apply_augmentation(dm, augment_train=cfg.data.augment)
-    return dm
+    if hasattr(datamodule, "train_transform") and "augment" in cfg.data:
+        from data_modules.data_augmentation import apply_augmentation
 
-
-def get_model(cfg):
-    return instantiate(cfg.model)
+        apply_augmentation(
+            datamodule, augment_train=bool(cfg.data.augment)
+        )
+    return datamodule
 
 
-def train_one_fold(cfg, fold: int, multi_fold: bool = False):
-    base_name = cfg.model.run_name
-    if multi_fold:
-        run_name = base_name
-        ckpt_dir = Path("checkpoints") / base_name / str(fold)
-    else:
-        run_name = f"{base_name}_fold{fold}"
-        ckpt_dir = Path("checkpoints") / run_name
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
+def _model_value(cfg: DictConfig, key: str, default):
+    return cfg.model.get(key, default)
 
-    wandb_run_name = f"{base_name}_fold{fold}"
 
-    print(f"\n{'='*60}")
-    print(f"  Fold {fold} — {wandb_run_name}")
-    print(f"  Checkpoint dir: {ckpt_dir}")
-    print(f"{'='*60}")
+def compute_pos_weight(records) -> tuple[float, int, int]:
+    """Compute N_negative/N_positive from training patients only."""
 
-    OmegaConf.save(cfg, ckpt_dir / "config.yaml")
-    print(f"Config saved -> {ckpt_dir / 'config.yaml'}\n")
+    positives = int((records["label"] == 1).sum())
+    negatives = int((records["label"] == 0).sum())
+    if positives == 0 or negatives == 0:
+        raise ValueError(
+            f"Cannot compute pos_weight with positive={positives}, "
+            f"negative={negatives}"
+        )
+    return negatives / positives, negatives, positives
 
-    dm = get_datamodule(cfg, fold)
 
-    attach_augmentation(dm, cfg)
+def train_one_fold(cfg: DictConfig, fold: int) -> Path:
+    run_name = str(_model_value(cfg, "run_name", "anymc3d"))
+    checkpoint_dir = Path("checkpoints") / run_name / f"fold_{fold}"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    OmegaConf.save(cfg, checkpoint_dir / "config.yaml")
 
-    model = get_model(cfg)
-
-    wandb_logger = WandbLogger(
-        project = cfg.model.project,
-        name    = wandb_run_name,
-        config  = OmegaConf.to_container(cfg, resolve=True),
+    L.seed_everything(
+        int(_model_value(cfg, "seed", 0)), workers=True
     )
-
-    checkpoint_cb = ModelCheckpoint(
-        dirpath    = str(ckpt_dir),
-        monitor    = "val/AUROC",
-        mode       = "max",
-        save_top_k = cfg.model.save_top_k,
-        filename   = "epoch={epoch:02d}-val_auroc={val/AUROC:.4f}",
-        auto_insert_metric_name = False,
-        verbose    = True,
+    datamodule = attach_legacy_augmentation(
+        get_datamodule(cfg, fold), cfg
     )
-    early_stop_cb = EarlyStopping(
-        monitor  = "val/loss",
-        mode     = "min",
-        patience = cfg.model.early_stopping_patience,
-        verbose  = True,
-    )
-    lr_monitor = LearningRateMonitor()
+    model_overrides = {"fold": fold} if "fold" in cfg.model else {}
+    configured_pos_weight = cfg.model.get("pos_weight")
+    if configured_pos_weight == "auto":
+        if not hasattr(datamodule, "train_records"):
+            raise TypeError("pos_weight=auto requires a fold-aware DataModule")
+        datamodule.setup(stage="fit")
+        pos_weight, negatives, positives = compute_pos_weight(
+            datamodule.train_records
+        )
+        model_overrides["pos_weight"] = pos_weight
+        balance = {
+            "fold": fold,
+            "negative_training_patients": negatives,
+            "positive_training_patients": positives,
+            "pos_weight": pos_weight,
+        }
+        (checkpoint_dir / "class_balance.json").write_text(
+            json.dumps(balance, indent=2) + "\n"
+        )
+        print(f"Fold {fold} class balance: {balance}")
+    model = instantiate(cfg.model, **model_overrides)
+    if hasattr(model, "model") and hasattr(model.model, "parameter_report"):
+        report = model.model.parameter_report()
+        print(f"Parameter report: {report}")
+        print("LoRA modules:")
+        for name in model.model.lora_report.all_modules:
+            print(f"  {name}")
 
+    checkpoint_metric = str(
+        _model_value(cfg, "checkpoint_metric", "val/AUROC")
+    )
+    additional_metrics = list(
+        _model_value(cfg, "additional_checkpoint_metrics", [])
+    )
+    checkpoint_metrics = list(
+        dict.fromkeys([checkpoint_metric, *additional_metrics])
+    )
+    checkpoint_callbacks = []
+    for metric in checkpoint_metrics:
+        metric_label = metric.removeprefix("val_").replace("/", "_")
+        checkpoint_callbacks.append(
+            ModelCheckpoint(
+                dirpath=checkpoint_dir,
+                monitor=metric,
+                mode=metric_mode(metric),
+                save_top_k=int(_model_value(cfg, "save_top_k", 1)),
+                filename=f"best-{metric_label}-epoch={{epoch:03d}}",
+                auto_insert_metric_name=False,
+            )
+        )
+    early_metric = str(
+        _model_value(
+            cfg,
+            "early_stopping_metric",
+            "val_loss" if "_" in checkpoint_metric else "val/loss",
+        )
+    )
+    callbacks = [
+        *checkpoint_callbacks,
+        EarlyStopping(
+            monitor=early_metric,
+            mode=metric_mode(early_metric),
+            patience=int(
+                _model_value(cfg, "early_stopping_patience", 30)
+            ),
+            min_delta=float(
+                _model_value(cfg, "early_stopping_min_delta", 0.0)
+            ),
+            check_on_train_epoch_end=False,
+        ),
+        LearningRateMonitor(logging_interval="epoch"),
+        EpochMetricsHistory(
+            checkpoint_dir / "epoch_metrics.csv", fold=fold
+        ),
+    ]
+    logger = CSVLogger(
+        save_dir=str(checkpoint_dir), name="lightning_logs"
+    )
     trainer = L.Trainer(
-        max_epochs        = cfg.model.max_epochs,
-        accelerator       = "gpu",
-        devices           = cfg.model.devices,
-        strategy          = cfg.model.strategy,
-        num_nodes         = cfg.model.num_nodes,
-        sync_batchnorm    = cfg.model.sync_batchnorm,
-        precision         = cfg.model.precision,
-        logger            = wandb_logger,
-        callbacks         = [checkpoint_cb, early_stop_cb, lr_monitor],
-        log_every_n_steps = cfg.model.log_every_n_steps,
-        deterministic     = False,
+        max_epochs=int(_model_value(cfg, "max_epochs", 100)),
+        accelerator=_model_value(cfg, "accelerator", "auto"),
+        devices=_model_value(cfg, "devices", 1),
+        strategy=_model_value(cfg, "strategy", "auto"),
+        precision=_model_value(cfg, "precision", "bf16-mixed"),
+        callbacks=callbacks,
+        logger=logger,
+        deterministic=True,
+        gradient_clip_val=float(
+            _model_value(cfg, "gradient_clip_val", 0.0)
+        ),
+        accumulate_grad_batches=int(
+            _model_value(cfg, "accumulate_grad_batches", 1)
+        ),
+        log_every_n_steps=int(
+            _model_value(cfg, "log_every_n_steps", 10)
+        ),
+        enable_progress_bar=bool(
+            _model_value(cfg, "enable_progress_bar", False)
+        ),
     )
-
-    print(f"Starting training — fold {fold}...")
-    trainer.fit(model, datamodule=dm)
-
-    print(f"\nRunning test set evaluation — fold {fold}...")
-    if "test" in dm._available_splits:
-        trainer.test(model, datamodule=dm, ckpt_path="best")
-    else:
-        print(f"No test split — skipping test evaluation for fold {fold}.")
-
-    wandb.finish()
-    print(f"\nFold {fold} complete. Outputs: {ckpt_dir}")
+    trainer.fit(model, datamodule=datamodule)
+    # Freeze every callback's best state before loading the primary checkpoint:
+    # Lightning restores callback state during validate(), which can otherwise
+    # erase later callbacks' best paths from the final JSON summary.
+    checkpoint_summary = snapshot_checkpoint_summary(
+        checkpoint_metrics, checkpoint_callbacks
+    )
+    # Re-export predictions/attention from the selected checkpoint, not merely
+    # the final epoch.
+    trainer.validate(
+        model=None,
+        datamodule=datamodule,
+        ckpt_path=checkpoint_summary[checkpoint_metric]["path"],
+    )
+    for metric, summary in checkpoint_summary.items():
+        print(f"Best {metric} checkpoint: {summary['path']}")
+    (checkpoint_dir / "best_checkpoints.json").write_text(
+        json.dumps(checkpoint_summary, indent=2) + "\n"
+    )
+    return Path(checkpoint_callbacks[0].best_model_path)
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="train")
 def main(cfg: DictConfig) -> None:
-
-    torch.set_float32_matmul_precision('medium')
-    L.seed_everything(cfg.model.seed)
-
-    # ── Sanity check: model task and data task must agree ─────────────────
-    model_task = cfg.model.get('task', 'multiclass')
-    data_task  = cfg.data.module.get('task', 'multiclass')
-    if model_task != data_task:
-        raise ValueError(
-            f"Task mismatch: model.task={model_task!r} but "
-            f"data.module.task={data_task!r}. They must agree."
-        )
-
-    # Also: for multilabel, num_classes must equal len(label_cols)
-    if model_task == 'multilabel':
-        n_labels = len(cfg.data.module.get('label_cols') or [])
-        if cfg.model.num_classes != n_labels:
-            raise ValueError(
-                f"Multilabel: model.num_classes={cfg.model.num_classes} "
-                f"but data has {n_labels} label_cols. They must match."
-            )
-
-    print("\n" + "=" * 60)
-    print(f"Training: {cfg.model.run_name}")
-    print("=" * 60)
-    print(OmegaConf.to_yaml(cfg))
-    print("=" * 60 + "\n")
-
-    fold_cfg = cfg.data.module.fold
-
-    if isinstance(fold_cfg, (list, ListConfig)):
-        folds = list(fold_cfg)
-        print(f"Multi-fold training: folds {folds}\n")
-    else:
-        folds = [int(fold_cfg)]
-        print(f"Single-fold training: fold {folds[0]}\n")
-
-    multi_fold = len(folds) > 1
+    torch.set_float32_matmul_precision("high")
+    folds = resolve_folds(cfg)
     for fold in folds:
-        train_one_fold(cfg, fold, multi_fold=multi_fold)
-
-    print(f"\n{'='*60}")
-    print(f"All folds complete: {folds}")
-    print(f"{'='*60}")
+        train_one_fold(cfg, fold)
 
 
 if __name__ == "__main__":

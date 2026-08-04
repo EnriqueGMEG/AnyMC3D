@@ -1,0 +1,153 @@
+{
+  "checkpoint": "facebook/dinov3-vitb16-pretrain-lvd1689m",
+  "checkpoint_kind": "official gated pretrained weights",
+  "patient_id": "PANCREAS_501",
+  "volume_shape_BS1HW": [
+    1,
+    47,
+    1,
+    160,
+    224
+  ],
+  "last_hidden_state_shape_one_slice": [
+    1,
+    145,
+    768
+  ],
+  "cls_shape_one_slice": [
+    1,
+    768
+  ],
+  "logits_shape": [
+    1,
+    1
+  ],
+  "attention_shape": [
+    1,
+    47
+  ],
+  "encoded_real_slices": 47,
+  "attention_sum": 1.0,
+  "attention_min": 0.021106308326125145,
+  "attention_max": 0.021434001624584198,
+  "logit_untrained_head": -0.08435520529747009,
+  "probability_untrained_head": 0.4789236783981323,
+  "total_parameters": 86116609,
+  "trainable_parameters": 456193,
+  "trainable_percent": 0.529738694193126,
+  "lora_module_count": 49,
+  "lora_modules": [
+    "embeddings.patch_embeddings",
+    "model.layer.0.attention.q_proj",
+    "model.layer.1.attention.q_proj",
+    "model.layer.2.attention.q_proj",
+    "model.layer.3.attention.q_proj",
+    "model.layer.4.attention.q_proj",
+    "model.layer.5.attention.q_proj",
+    "model.layer.6.attention.q_proj",
+    "model.layer.7.attention.q_proj",
+    "model.layer.8.attention.q_proj",
+    "model.layer.9.attention.q_proj",
+    "model.layer.10.attention.q_proj",
+    "model.layer.11.attention.q_proj",
+    "model.layer.0.attention.k_proj",
+    "model.layer.1.attention.k_proj",
+    "model.layer.2.attention.k_proj",
+    "model.layer.3.attention.k_proj",
+    "model.layer.4.attention.k_proj",
+    "model.layer.5.attention.k_proj",
+    "model.layer.6.attention.k_proj",
+    "model.layer.7.attention.k_proj",
+    "model.layer.8.attention.k_proj",
+    "model.layer.9.attention.k_proj",
+    "model.layer.10.attention.k_proj",
+    "model.layer.11.attention.k_proj",
+    "model.layer.0.attention.v_proj",
+    "model.layer.1.attention.v_proj",
+    "model.layer.2.attention.v_proj",
+    "model.layer.3.attention.v_proj",
+    "model.layer.4.attention.v_proj",
+    "model.layer.5.attention.v_proj",
+    "model.layer.6.attention.v_proj",
+    "model.layer.7.attention.v_proj",
+    "model.layer.8.attention.v_proj",
+    "model.layer.9.attention.v_proj",
+    "model.layer.10.attention.v_proj",
+    "model.layer.11.attention.v_proj",
+    "model.layer.0.attention.o_proj",
+    "model.layer.1.attention.o_proj",
+    "model.layer.2.attention.o_proj",
+    "model.layer.3.attention.o_proj",
+    "model.layer.4.attention.o_proj",
+    "model.layer.5.attention.o_proj",
+    "model.layer.6.attention.o_proj",
+    "model.layer.7.attention.o_proj",
+    "model.layer.8.attention.o_proj",
+    "model.layer.9.attention.o_proj",
+    "model.layer.10.attention.o_proj",
+    "model.layer.11.attention.o_proj"
+  ],
+  "device": "NVIDIA RTX 5000 Ada Generation",
+  "real_validation_batch_forward": {
+    "patient_ids": [
+      "PANCREAS_502",
+      "PANCREAS_505"
+    ],
+    "batch_volume_shape": [
+      2,
+      52,
+      1,
+      160,
+      224
+    ],
+    "valid_slices_per_patient": [
+      52,
+      32
+    ],
+    "encoded_real_slices": 84,
+    "logits_shape": [
+      2,
+      1
+    ],
+    "attention_shape": [
+      2,
+      52
+    ],
+    "attention_sums": [
+      0.9999999403953552,
+      1.0
+    ],
+    "padded_attention_max": 0.0
+  },
+  "pretrained_single_training_step": {
+    "patient_ids": [
+      "zzu_109",
+      "PANCREAS_618"
+    ],
+    "volume_shape": [
+      2,
+      50,
+      1,
+      160,
+      224
+    ],
+    "valid_slices": [
+      42,
+      50
+    ],
+    "logits_shape": [
+      2,
+      1
+    ],
+    "loss": 0.12701554596424103,
+    "patch_lora_B_grad_norm": 0.1899127960205078,
+    "q_lora_B_grad_norm": 0.006179226096719503,
+    "task_query_grad_norm": 0.0010177373187616467,
+    "classification_head_grad_norm": 1.9397165775299072,
+    "peak_gpu_memory_gib": 6.342011451721191,
+    "optimizer_groups": [
+      "lora",
+      "query_and_head"
+    ]
+  }
+}

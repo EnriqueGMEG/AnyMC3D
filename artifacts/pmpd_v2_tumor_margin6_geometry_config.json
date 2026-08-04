@@ -1,0 +1,168 @@
+{
+  "schema_version": 2,
+  "coordinate_convention": {
+    "nifti_array": "X,Y,Z canonical RAS",
+    "model_volume": "S,1,H,W = Z,1,Y,X"
+  },
+  "geometry_uses_classification_labels": false,
+  "roi_uses_segmentation_labels": true,
+  "roi_policy": {
+    "mode": "preferred_label_with_fallback",
+    "preferred_label": 2,
+    "preferred_name": "tumor",
+    "min_preferred_volume_mm3": 100.0,
+    "component_policy": "largest",
+    "connectivity": 26,
+    "fallback_mode": "all_foreground",
+    "fallback_name": "pancreas_fallback"
+  },
+  "num_cases": 479,
+  "spacing_mode": "resample_to_common_spacing",
+  "target_spacing_mm": {
+    "x": 0.7820000052452087,
+    "y": 0.7820000052452087,
+    "z": 2.0
+  },
+  "crop_margin_mm": [
+    6.0,
+    6.0,
+    6.0
+  ],
+  "patch_size": 16,
+  "canvas_policy": "dataset_max",
+  "canvas_percentile": 99.0,
+  "overflow_policy": "error",
+  "canvas_hw": [
+    144,
+    224
+  ],
+  "distributions": {
+    "H": {
+      "min": 23.0,
+      "median": 51.0,
+      "p95": 99.0,
+      "p99": 118.21999999999997,
+      "p99_5": 124.05000000000007,
+      "max": 135.0
+    },
+    "W": {
+      "min": 23.0,
+      "median": 54.0,
+      "p95": 123.19999999999993,
+      "p99": 201.6599999999999,
+      "p99_5": 206.22000000000003,
+      "max": 222.0
+    },
+    "S": {
+      "min": 9.0,
+      "median": 20.0,
+      "p95": 37.0,
+      "p99": 48.87999999999988,
+      "p99_5": 53.83000000000004,
+      "max": 62.0
+    },
+    "spacing_x_original": {
+      "min": 0.33092498779296875,
+      "median": 0.7820000052452087,
+      "p95": 0.9765625,
+      "p99": 0.9765629768371582,
+      "p99_5": 0.9765629768371582,
+      "max": 0.9765629768371582
+    },
+    "spacing_y_original": {
+      "min": 0.33092498779296875,
+      "median": 0.7820000052452087,
+      "p95": 0.9765625,
+      "p99": 0.9765629768371582,
+      "p99_5": 0.9765629768371582,
+      "max": 0.9765629768371582
+    },
+    "spacing_z_original": {
+      "min": 1.9999999999999998,
+      "median": 2.0,
+      "p95": 2.0,
+      "p99": 2.0000000000000266,
+      "p99_5": 2.0000000000000266,
+      "max": 2.0000000000000266
+    }
+  },
+  "canvas_options": {
+    "p95": {
+      "percentile": 95.0,
+      "canvas_hw": [
+        112,
+        128
+      ],
+      "patients_exceeding_canvas": 22,
+      "float32_volume_memory_mib": {
+        "median_slices": 1.09375,
+        "p95_slices": 2.0234375,
+        "max_slices": 3.390625
+      },
+      "float32_rgb_input_memory_mib": {
+        "median_slices": 3.28125,
+        "p95_slices": 6.0703125,
+        "max_slices": 10.171875
+      }
+    },
+    "p99": {
+      "percentile": 99.0,
+      "canvas_hw": [
+        128,
+        208
+      ],
+      "patients_exceeding_canvas": 3,
+      "float32_volume_memory_mib": {
+        "median_slices": 2.03125,
+        "p95_slices": 3.7578125,
+        "max_slices": 6.296875
+      },
+      "float32_rgb_input_memory_mib": {
+        "median_slices": 6.09375,
+        "p95_slices": 11.2734375,
+        "max_slices": 18.890625
+      }
+    },
+    "p99_5": {
+      "percentile": 99.5,
+      "canvas_hw": [
+        128,
+        208
+      ],
+      "patients_exceeding_canvas": 3,
+      "float32_volume_memory_mib": {
+        "median_slices": 2.03125,
+        "p95_slices": 3.7578125,
+        "max_slices": 6.296875
+      },
+      "float32_rgb_input_memory_mib": {
+        "median_slices": 6.09375,
+        "p95_slices": 11.2734375,
+        "max_slices": 18.890625
+      }
+    },
+    "dataset_max": {
+      "percentile": 100.0,
+      "canvas_hw": [
+        144,
+        224
+      ],
+      "patients_exceeding_canvas": 0,
+      "float32_volume_memory_mib": {
+        "median_slices": 2.4609375,
+        "p95_slices": 4.552734375,
+        "max_slices": 7.62890625
+      },
+      "float32_rgb_input_memory_mib": {
+        "median_slices": 7.3828125,
+        "p95_slices": 13.658203125,
+        "max_slices": 22.88671875
+      }
+    }
+  },
+  "implementation_decisions": [
+    "Unlike the paper's fixed 432x240x70 T5 input, crops are not resized.",
+    "All real post-crop slices are retained after common-spacing resampling.",
+    "A shared rectangular in-plane canvas is filled by constant padding."
+  ]
+}

@@ -32,8 +32,19 @@ build/
 Thumbs.db
 
 # Data & preprocessed volumes
+data/pancreas_metastasis_manifest.csv
+data/pancreas_metastasis_preprocessed/
+data/pmpd_v2_manifest.csv
+data/pmpd_v2_preprocessed/
+data/*_preprocessed*/
+data/*manifest*
 preprocessed_data/
 *.npy
+*.npz
+
+# Generated audit tables and local training supervision
+artifacts/*cases.csv
+training_logs/
 
 # Virtual environment
 .venv/
@@ -53,7 +64,6 @@ evaluate_predictions.py
 fix_nii.py
 huggingface.py
 inference_5_folds.py
-inference.py
 meningioma_holdout_dataset.py
 meningioma_t1c_dataset.py
 nifti_image_check.py

@@ -1,0 +1,56 @@
+{
+  "dataset": {
+    "num_patients": 479,
+    "sources": {
+      "PANGENE_OG": 111,
+      "ZZU": 224,
+      "RUM": 144
+    },
+    "folds": {
+      "1": {"total": 95, "negative": 58, "positive": 37},
+      "2": {"total": 96, "negative": 59, "positive": 37},
+      "3": {"total": 96, "negative": 58, "positive": 38},
+      "4": {"total": 96, "negative": 58, "positive": 38},
+      "5": {"total": 96, "negative": 58, "positive": 38}
+    },
+    "bbox_foreground_condition": "mask > 0"
+  },
+  "preprocessing": {
+    "target_spacing_mm_xyz": [0.7820000052452087, 0.7820000052452087, 2.0],
+    "canvas_hw": [160, 240],
+    "slice_count": {"min": 21, "median": 42, "p95": 53, "max": 65},
+    "manifest_rows": 479,
+    "npz_artifacts": 479,
+    "preprocessing_logs": 479,
+    "errors": 0
+  },
+  "official_pretrained_forward": {
+    "backbone": "facebook/dinov3-vitb16-pretrain-lvd1689m",
+    "input_shape": [2, 56, 1, 160, 240],
+    "valid_slices": [56, 36],
+    "encoded_slices": 92,
+    "logits_shape": [2, 1],
+    "attention_shape": [2, 56],
+    "attention_sums": [1.0, 1.0],
+    "padded_attention_max": 0.0,
+    "precision": "bf16 autocast"
+  },
+  "official_pretrained_training_step": {
+    "input_shape": [2, 52, 1, 160, 240],
+    "valid_slices": [52, 41],
+    "encoded_slices": 93,
+    "loss": 0.15005949139595032,
+    "nonzero_gradients": {
+      "patch_embedding_lora_B": true,
+      "first_block_query_lora_B": true,
+      "task_query": true,
+      "classification_head": true
+    },
+    "peak_cuda_memory_gib": 6.696,
+    "precision": "bf16 autocast"
+  },
+  "tests": {
+    "passed": 21,
+    "failed": 0
+  }
+}

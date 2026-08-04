@@ -1,0 +1,53 @@
+{
+  "device": "NVIDIA RTX 5000 Ada Generation 32GB",
+  "precision": "bf16 autocast",
+  "cases": "Patients with the largest preprocessed slice counts",
+  "timed_optimizer_steps": 3,
+  "results": [
+    {
+      "batch_size": 2,
+      "slice_chunk_size": 8,
+      "valid_slices": [65, 63],
+      "seconds_per_step": 0.43631960765924305,
+      "patients_per_second": 4.583795834272844,
+      "slices_per_second": 293.362933393462,
+      "peak_allocated_gib": 9.087000370025635,
+      "peak_reserved_gib": 9.169921875
+    },
+    {
+      "batch_size": 4,
+      "slice_chunk_size": 16,
+      "valid_slices": [65, 63, 62, 61],
+      "seconds_per_step": 0.41899401232755434,
+      "patients_per_second": 9.546675805173429,
+      "slices_per_second": 599.0539067746327,
+      "peak_allocated_gib": 14.72647762298584,
+      "peak_reserved_gib": 15.1484375
+    },
+    {
+      "batch_size": 4,
+      "slice_chunk_size": 32,
+      "valid_slices": [65, 63, 62, 61],
+      "seconds_per_step": 0.3291363400251915,
+      "patients_per_second": 12.153018410831958,
+      "slices_per_second": 762.6019052797054,
+      "peak_allocated_gib": 13.188977241516113,
+      "peak_reserved_gib": 13.66015625
+    },
+    {
+      "batch_size": 6,
+      "slice_chunk_size": 24,
+      "valid_slices": [65, 63, 62, 61, 61, 60],
+      "seconds_per_step": 0.4786278676474467,
+      "patients_per_second": 12.535835051751626,
+      "slices_per_second": 777.2217732086008,
+      "peak_allocated_gib": 19.841932773590088,
+      "peak_reserved_gib": 20.40234375
+    }
+  ],
+  "selected": {
+    "batch_size": 4,
+    "slice_chunk_size": 32,
+    "reason": "Within 3% of batch 6 throughput, with lower memory and a more conservative optimization batch."
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "device": "NVIDIA RTX 5000 Ada Generation 32GB",
+  "backbone": "facebook/dinov3-vitl16-pretrain-lvd1689m",
+  "backbone_parameters": 303129600,
+  "precision": "bf16 autocast",
+  "gradient_checkpointing": true,
+  "loss": "bce",
+  "cases": "Patients with the largest preprocessed slice counts",
+  "timed_optimizer_steps": 2,
+  "results": [
+    {
+      "batch_size": 2,
+      "slice_chunk_size": 16,
+      "valid_slices": [65, 63],
+      "seconds_per_step": 0.8243764165090397,
+      "patients_per_second": 2.426076195228068,
+      "peak_reserved_gib": 3.5
+    },
+    {
+      "batch_size": 4,
+      "slice_chunk_size": 16,
+      "valid_slices": [65, 63, 62, 61],
+      "seconds_per_step": 1.5301360124722123,
+      "patients_per_second": 2.614146695062274,
+      "peak_reserved_gib": 5.65625
+    },
+    {
+      "batch_size": 4,
+      "slice_chunk_size": 32,
+      "valid_slices": [65, 63, 62, 61],
+      "seconds_per_step": 1.5197739904979244,
+      "patients_per_second": 2.631970296247456,
+      "peak_reserved_gib": 5.7421875
+    },
+    {
+      "batch_size": 8,
+      "slice_chunk_size": 32,
+      "valid_slices": [65, 63, 62, 61, 61, 60, 59, 58],
+      "seconds_per_step": 2.9102992530097254,
+      "patients_per_second": 2.7488582116518403,
+      "peak_reserved_gib": 9.8046875
+    }
+  ],
+  "selected": {
+    "batch_size": 4,
+    "slice_chunk_size": 32,
+    "reason": "Batch 8 adds only 4.4% patient throughput while doubling the optimization batch."
+  }
+}

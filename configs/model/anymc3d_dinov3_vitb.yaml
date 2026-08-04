@@ -1,0 +1,43 @@
+# @package _global_
+model:
+  _target_: model_arch.pancreas_lightning.PancreasMetastasisLightningModule
+
+  backbone_name: facebook/dinov3-vitb16-pretrain-lvd1689m
+  lora_rank: 8
+  lora_alpha: 16
+  slice_chunk_size: 8
+  gradient_checkpointing: false
+
+  loss: bce
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  pos_weight: auto
+
+  lora_lr: 1.0e-4
+  lora_weight_decay: 1.0e-5
+  head_lr: 1.0e-3
+  head_weight_decay: 1.0e-4
+
+  threshold: 0.5
+  threshold_mode: fixed
+  fold: ${data.fold}
+  output_dir: outputs/pancreas_metastasis
+
+  max_epochs: 100
+  precision: bf16-mixed
+  seed: 0
+  early_stopping_patience: 30
+  early_stopping_metric: val_pr_auc
+  early_stopping_min_delta: 0.0
+  checkpoint_metric: val_pr_auc
+  additional_checkpoint_metrics: [val_auroc]
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  devices: 1
+  accelerator: auto
+  strategy: auto
+  log_every_n_steps: 10
+  enable_progress_bar: false
+  save_top_k: 1
+
+  run_name: anymc3d-dinov3-vitb-pancreas-metastasis

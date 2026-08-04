@@ -12,6 +12,7 @@ torchmetrics>=1.0.0
 
 # --- AnyMC3D specific ---
 peft>=0.10.0              # LoRA adapters
+transformers>=4.56.0      # Official DINOv3 ViT implementation
 einops>=0.7.0             # Tensor rearranging for slice operations
 timm>=0.9.0               # Backup vision model utilities
 

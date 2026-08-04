@@ -1,0 +1,23 @@
+spacing_mode: resample_to_common_spacing
+
+target_spacing_mm:
+  x: auto
+  y: auto
+  z: 2.0
+
+spacing_tolerance_mm: 0.01
+crop_margin_mm: [12.0, 12.0, 12.0]
+
+hu_min: -150.0
+hu_max: 250.0
+
+canvas_policy: dataset_max
+canvas_percentile: 99.0
+overflow_policy: error
+patch_size: 16
+padding_value_rescaled: 0.0
+
+alignment:
+  affine_atol: 1.0e-4
+  spacing_atol: 1.0e-4
+  resample_mask_to_ct: false

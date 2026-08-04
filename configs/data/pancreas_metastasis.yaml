@@ -1,0 +1,12 @@
+name: pancreas_metastasis
+fold: 0
+
+module:
+  _target_: data_modules.pancreas_metastasis_dataset.PancreasMetastasisDataModule
+  manifest_path: data/pancreas_metastasis_manifest.csv
+  preprocessed_root: data/pancreas_metastasis_preprocessed
+  fold: ${data.fold}
+  batch_size: 2
+  num_workers: 4
+  augmentation_profile: size_preserving
+  validate_nifti_on_setup: true

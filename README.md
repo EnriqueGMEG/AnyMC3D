@@ -2,6 +2,8 @@
 
 This repository aims to reproduce [CVPR2026 AnyMC3D](https://arxiv.org/abs/2512.12887) for 3D medical image classification by fine-tuning 2D foundation models. 
 
+> Para el pipeline CT portal-venoso + máscara pancreática + DINOv3, consulte [README_PANCREAS_METASTASIS.md](README_PANCREAS_METASTASIS.md).
+
 
 ---
 

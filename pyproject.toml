@@ -11,6 +11,7 @@ dependencies = [
     "torchmetrics>=1.0.0",
     # --- AnyMC3D specific ---
     "peft>=0.10.0", # LoRA adapters for frozen backbones
+    "transformers>=4.56.0", # Official DINOv3 ViT implementation
     "einops>=0.7.0", # Tensor rearranging for slice operations
     "timm>=0.9.0", # Vision model utilities / backbones
     "xformers>=0.0.22", # Memory-efficient attention for DINOv2 ViT
@@ -41,6 +42,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "ruff>=0.4.0",               # Linting
+    "pytest>=8.0.0",
     "ipython>=8.0.0",
     "jupyter>=1.0.0",
 ]
