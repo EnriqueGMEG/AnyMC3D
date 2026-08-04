@@ -98,18 +98,26 @@ Salida: outputs/pmpd_v2_vitb_tumor_margin6_cv/.
 - ViT-L y smoke tests: parciales; no son resultados finales.
 - Los directorios exactos están en outputs/ y los pesos en checkpoints/.
 
+## Snapshot de métricas incluido en Git
+
+`experiment_results/` conserva una copia ligera de las métricas agregadas y por fold, resúmenes CV, curvas de entrenamiento limpias y resultados externos disponibles el 4 de agosto de 2026. Incluye tanto experimentos completos como parciales para poder comparar futuras corridas después de la migración.
+
+No contiene checkpoints, pesos, predicciones por paciente, atención por slice ni datos clínicos. Su inventario y límites están descritos en `experiment_results/README.md`.
+
+Por tanto, un clone recupera las métricas necesarias para comparar modelos. Solo hace falta transferir `outputs/` aparte si se necesitan predicciones a nivel paciente, figuras u otros artefactos no agregados.
+
 ## Archivos fuera de Git
 
 | Ruta | Tamaño aprox. | Acción |
 |---|---:|---|
 | checkpoints/ | 17 GB | Transferir aparte para reanudar/evaluar |
 | data/ | 1.8 GB | Transferir preprocesados o regenerarlos |
-| outputs/ | 11 MB | Transferir aparte; contiene predicciones y OOF |
+| outputs/ | 11 MB | Opcional; transferir para predicciones/OOF a nivel paciente y figuras |
 | artifacts/ | 1.2 MB | JSON versionados; CSV clínicos aparte |
 | training_logs/ | 544 KB | Opcional, ignorado por Git |
 | .venv/ | 437 MB | No transferir; recrear |
 
-Un git clone no recupera checkpoints ni resultados. Antes de retirar la máquina antigua, copiar las rutas necesarias y verificar tamaños/checksums.
+Un git clone recupera código y métricas seleccionadas, pero no checkpoints, datos ni resultados a nivel paciente. Antes de retirar la máquina antigua, copiar las rutas necesarias y verificar tamaños/checksums.
 
 ## Entorno registrado
 
@@ -139,7 +147,7 @@ DINOv3 es gated en Hugging Face. Hay que aceptar la licencia y ejecutar hf auth 
 2. Recrear el entorno y ejecutar pytest -q.
 3. Montar/copiar PMPD_v2_data y regenerar manifiestos con rutas nuevas.
 4. Transferir o regenerar los NPZ del contrato geométrico elegido.
-5. Transferir checkpoints/ y outputs/ si se quiere conservar el estado experimental.
+5. Usar experiment_results/ para comparaciones; transferir checkpoints/ y, si hace falta análisis por paciente, outputs/.
 6. Completar fold 5 de pmpd_v2_vitb_regularized_margin12_full_cv antes de agregar resultados.
 7. Validar un smoke test en una GPU y luego lanzar CV con los scripts de dos GPU.
 
