@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproducible single-patient inference from raw CT and pancreas mask."""
+"""Reproducible single-patient inference from CT and an optional ROI mask."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from preprocessing.inference_contract import preprocess_with_saved_contract
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ct", type=Path, required=True)
-    parser.add_argument("--pancreas-mask", type=Path, required=True)
+    parser.add_argument("--pancreas-mask", type=Path, default=None)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--geometry-config", type=Path, required=True)
     parser.add_argument(

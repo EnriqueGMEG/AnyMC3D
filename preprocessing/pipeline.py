@@ -9,7 +9,14 @@ from typing import Any, Mapping, Sequence
 import nibabel as nib
 import numpy as np
 
-from .pancreas_crop import canonicalize_pair, crop_from_mask_roi, inspect_image
+from .pancreas_crop import (
+    canonicalize_ct,
+    canonicalize_pair,
+    crop_from_mask_roi,
+    full_volume_region,
+    inspect_image,
+    normalize_roi_policy,
+)
 from .resampling import physical_span_mm, resample_image_to_spacing
 
 
@@ -52,6 +59,63 @@ def window_ct(
         raise ValueError(f"hu_max must exceed hu_min, got {hu_min}, {hu_max}")
     clipped = np.clip(np.asarray(data_hu, dtype=np.float32), hu_min, hu_max)
     return ((clipped - hu_min) / (hu_max - hu_min)).astype(np.float32)
+
+
+def normalize_prewindowed_ct(
+    data: np.ndarray,
+    *,
+    input_min: float = 0.0,
+    input_max: float = 255.0,
+    range_tolerance: float = 1.0e-3,
+) -> np.ndarray:
+    """Validate an already-windowed CT and scale it once to float32 [0, 1]."""
+
+    if input_max <= input_min:
+        raise ValueError(
+            f"input_max must exceed input_min, got {input_min}, {input_max}"
+        )
+    if range_tolerance < 0:
+        raise ValueError("range_tolerance cannot be negative")
+    values = np.asarray(data, dtype=np.float32)
+    if not np.isfinite(values).all():
+        raise ValueError("Prewindowed CT contains NaN or infinite values")
+    observed_min = float(values.min())
+    observed_max = float(values.max())
+    if (
+        observed_min < input_min - range_tolerance
+        or observed_max > input_max + range_tolerance
+    ):
+        raise ValueError(
+            "Prewindowed CT is outside the declared input range "
+            f"[{input_min}, {input_max}]: observed "
+            f"[{observed_min}, {observed_max}]"
+        )
+    clipped = np.clip(values, input_min, input_max)
+    return ((clipped - input_min) / (input_max - input_min)).astype(np.float32)
+
+
+def normalize_ct_intensity(
+    data: np.ndarray,
+    *,
+    mode: str = "hu_window",
+    hu_min: float = -150.0,
+    hu_max: float = 250.0,
+    prewindowed_min: float = 0.0,
+    prewindowed_max: float = 255.0,
+    range_tolerance: float = 1.0e-3,
+) -> np.ndarray:
+    """Apply exactly one configured intensity conversion to [0, 1]."""
+
+    if mode == "hu_window":
+        return window_ct(data, hu_min=hu_min, hu_max=hu_max)
+    if mode == "prewindowed_0_255":
+        return normalize_prewindowed_ct(
+            data,
+            input_min=prewindowed_min,
+            input_max=prewindowed_max,
+            range_tolerance=range_tolerance,
+        )
+    raise ValueError(f"Unknown intensity mode: {mode}")
 
 
 def compute_symmetric_padding(
@@ -176,7 +240,7 @@ def preprocess_case(
     *,
     patient_id: str,
     ct_path: str | Path,
-    pancreas_mask_path: str | Path,
+    pancreas_mask_path: str | Path | None,
     target_spacing_mm: Sequence[float],
     canvas_hw: Sequence[int],
     crop_margin_mm: Sequence[float] = (4.0, 4.0, 4.0),
@@ -186,21 +250,36 @@ def preprocess_case(
     overflow_policy: str = "error",
     resample_mask_to_ct: bool = False,
     roi_policy: Mapping[str, Any] | None = None,
+    intensity_mode: str = "hu_window",
+    prewindowed_min: float = 0.0,
+    prewindowed_max: float = 255.0,
+    intensity_range_tolerance: float = 1.0e-3,
 ) -> PreprocessedCase:
     """Apply the complete physical-size-preserving pipeline to one patient."""
 
-    ct, mask, original_ct, original_mask, mask_resampled = canonicalize_pair(
-        ct_path,
-        pancreas_mask_path,
-        resample_mask_to_ct=resample_mask_to_ct,
-    )
+    policy = normalize_roi_policy(roi_policy)
+    if policy["mode"] == "full_volume":
+        ct, original_ct = canonicalize_ct(ct_path)
+        original_mask = None
+        mask_resampled = False
+        crop = full_volume_region(ct)
+    else:
+        if pancreas_mask_path is None:
+            raise ValueError(
+                f"ROI mode {policy['mode']!r} requires pancreas_mask_path"
+            )
+        ct, mask, original_ct, original_mask, mask_resampled = canonicalize_pair(
+            ct_path,
+            pancreas_mask_path,
+            resample_mask_to_ct=resample_mask_to_ct,
+        )
+        crop = crop_from_mask_roi(
+            ct,
+            mask,
+            margin_mm=crop_margin_mm,
+            roi_policy=policy,
+        )
     canonical_ct = inspect_image(ct)
-    crop = crop_from_mask_roi(
-        ct,
-        mask,
-        margin_mm=crop_margin_mm,
-        roi_policy=roi_policy,
-    )
     crop_before_shape = crop.shape
     crop_before_spacing = crop.spacing_mm
     crop_before_span = physical_span_mm(
@@ -210,15 +289,28 @@ def preprocess_case(
         crop.image,
         target_spacing_mm,
         tolerance_mm=spacing_tolerance_mm,
-        cval=hu_min,
+        cval=(
+            float(prewindowed_min)
+            if intensity_mode == "prewindowed_0_255"
+            else float(hu_min)
+        ),
     )
     resampled_spacing = tuple(
         float(v) for v in nib.affines.voxel_sizes(resampled.affine)
     )
     resampled_shape = tuple(int(v) for v in resampled.shape[:3])
     resampled_span = physical_span_mm(resampled_shape, resampled_spacing)
-    data_hu_xyz = resampled.get_fdata(dtype=np.float32)
-    data_01_xyz = window_ct(data_hu_xyz, hu_min=hu_min, hu_max=hu_max)
+    data_xyz = resampled.get_fdata(dtype=np.float32)
+    observed_intensity_range = [float(data_xyz.min()), float(data_xyz.max())]
+    data_01_xyz = normalize_ct_intensity(
+        data_xyz,
+        mode=intensity_mode,
+        hu_min=hu_min,
+        hu_max=hu_max,
+        prewindowed_min=prewindowed_min,
+        prewindowed_max=prewindowed_max,
+        range_tolerance=intensity_range_tolerance,
+    )
     # NIfTI X,Y,Z -> model S,1,H,W = Z,1,Y,X.
     unpadded = np.transpose(data_01_xyz, (2, 1, 0))[:, np.newaxis, :, :]
     shape_before_overflow_crop = (
@@ -262,8 +354,12 @@ def preprocess_case(
         )
     ]
     bbox_volume = float(np.prod(bbox_dims))
+    mask_used = policy["mode"] != "full_volume"
     geometry = {
         "patient_id": str(patient_id),
+        "input_region_mode": policy["mode"],
+        "mask_used": mask_used,
+        "intensity_mode": intensity_mode,
         "physical_crop_dimensions_mm_xyz": [
             float(n * spacing)
             for n, spacing in zip(resampled_shape, resampled_spacing)
@@ -315,9 +411,13 @@ def preprocess_case(
         "patient_id": str(patient_id),
         "status": "ok",
         "ct_path": str(Path(ct_path).resolve()),
-        "pancreas_mask_path": str(Path(pancreas_mask_path).resolve()),
+        "pancreas_mask_path": (
+            str(Path(pancreas_mask_path).resolve())
+            if pancreas_mask_path is not None and mask_used
+            else None
+        ),
         "original_ct": asdict(original_ct),
-        "original_mask": asdict(original_mask),
+        "original_mask": asdict(original_mask) if original_mask is not None else None,
         "canonical_ct": asdict(canonical_ct),
         "bbox_original": crop.bbox_original,
         "roi_source": crop.roi_source,
@@ -364,7 +464,18 @@ def preprocess_case(
         "canvas_hw": (canvas_h, canvas_w),
         "real_data_fraction_in_plane": real_fraction,
         "padding_fraction_in_plane": 1.0 - real_fraction,
-        "hu_window": (float(hu_min), float(hu_max)),
+        "intensity": {
+            "mode": intensity_mode,
+            "observed_input_range_after_resampling": observed_intensity_range,
+            "output_range": [float(data_01_xyz.min()), float(data_01_xyz.max())],
+            "hu_window": (
+                [float(hu_min), float(hu_max)]
+                if intensity_mode == "hu_window"
+                else None
+            ),
+            "prewindowed_range": [float(prewindowed_min), float(prewindowed_max)],
+            "range_tolerance": float(intensity_range_tolerance),
+        },
         "warnings": [],
         "errors": [],
     }

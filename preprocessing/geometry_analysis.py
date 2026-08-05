@@ -12,8 +12,10 @@ import numpy as np
 import pandas as pd
 
 from .pancreas_crop import (
+    canonicalize_ct,
     canonicalize_pair,
     crop_from_mask_roi,
+    full_volume_region,
     inspect_image,
     normalize_roi_policy,
 )
@@ -90,15 +92,21 @@ def resolve_target_spacing(
     y: float | str = "auto",
     z: float | str = 2.0,
     resample_mask_to_ct: bool = False,
+    roi_policy: Mapping[str, Any] | None = None,
 ) -> tuple[float, float, float]:
     """Resolve auto X/Y spacing to medians without using labels."""
 
+    policy = normalize_roi_policy(roi_policy)
     spacings: list[tuple[float, float, float]] = []
     for row in records.itertuples(index=False):
-        ct, _, _, _, _ = canonicalize_pair(
-            row.ct_path, row.pancreas_mask_path,
-            resample_mask_to_ct=resample_mask_to_ct,
-        )
+        if policy["mode"] == "full_volume":
+            ct, _ = canonicalize_ct(row.ct_path)
+        else:
+            ct, _, _, _, _ = canonicalize_pair(
+                row.ct_path,
+                row.pancreas_mask_path,
+                resample_mask_to_ct=resample_mask_to_ct,
+            )
         spacings.append(tuple(float(v) for v in inspect_image(ct).spacing_mm))
     values = np.asarray(spacings, dtype=float)
 
@@ -117,7 +125,7 @@ def audit_case_geometry(
     *,
     patient_id: str,
     ct_path: str,
-    pancreas_mask_path: str,
+    pancreas_mask_path: str | None,
     target_spacing_mm: Sequence[float],
     crop_margin_mm: Sequence[float],
     resample_mask_to_ct: bool = False,
@@ -126,18 +134,28 @@ def audit_case_geometry(
 ) -> GeometryCase:
     """Audit one patient without reading its classification label."""
 
-    ct, mask, original_ct, _, mask_resampled = canonicalize_pair(
-        ct_path,
-        pancreas_mask_path,
-        resample_mask_to_ct=resample_mask_to_ct,
-    )
+    policy = normalize_roi_policy(roi_policy)
+    if policy["mode"] == "full_volume":
+        ct, original_ct = canonicalize_ct(ct_path)
+        mask_resampled = False
+        crop = full_volume_region(ct)
+        mask_path_value = ""
+    else:
+        if pancreas_mask_path is None:
+            raise ValueError(f"ROI mode {policy['mode']!r} requires a mask")
+        ct, mask, original_ct, _, mask_resampled = canonicalize_pair(
+            ct_path,
+            pancreas_mask_path,
+            resample_mask_to_ct=resample_mask_to_ct,
+        )
+        crop = crop_from_mask_roi(
+            ct,
+            mask,
+            margin_mm=crop_margin_mm,
+            roi_policy=policy,
+        )
+        mask_path_value = str(Path(pancreas_mask_path).resolve())
     canonical = inspect_image(ct)
-    crop = crop_from_mask_roi(
-        ct,
-        mask,
-        margin_mm=crop_margin_mm,
-        roi_policy=roi_policy,
-    )
     target = tuple(float(v) for v in target_spacing_mm)
     spacing_delta = np.abs(np.asarray(crop.spacing_mm) - np.asarray(target))
     was_resampled = not np.all(spacing_delta <= float(spacing_tolerance_mm))
@@ -159,7 +177,7 @@ def audit_case_geometry(
     return GeometryCase(
         patient_id=str(patient_id),
         ct_path=str(Path(ct_path).resolve()),
-        pancreas_mask_path=str(Path(pancreas_mask_path).resolve()),
+        pancreas_mask_path=mask_path_value,
         original_shape=original_ct.shape,
         original_spacing_mm=original_ct.spacing_mm,
         original_orientation=original_ct.orientation,
@@ -275,6 +293,7 @@ def build_geometry_config(
     overflow_policy: str = "error",
     patch_size: int = 16,
     roi_policy: Mapping[str, Any] | None = None,
+    intensity_config: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
     """Build the JSON-serializable, label-independent geometry contract."""
 
@@ -285,18 +304,18 @@ def build_geometry_config(
         options, policy=canvas_policy, percentile=canvas_percentile
     )
     shapes = [case.model_shape_shw for case in cases]
+    policy = normalize_roi_policy(roi_policy)
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "coordinate_convention": {
             "nifti_array": "X,Y,Z canonical RAS",
             "model_volume": "S,1,H,W = Z,1,Y,X",
         },
         "geometry_uses_classification_labels": False,
-        "roi_uses_segmentation_labels": (
-            normalize_roi_policy(roi_policy)["mode"]
-            != "all_foreground"
-        ),
-        "roi_policy": normalize_roi_policy(roi_policy),
+        "roi_uses_segmentation_labels": policy["mode"] != "full_volume",
+        "mask_required": policy["mode"] != "full_volume",
+        "roi_policy": policy,
+        "intensity": dict(intensity_config or {"mode": "hu_window"}),
         "num_cases": len(cases),
         "spacing_mode": "resample_to_common_spacing",
         "target_spacing_mm": {

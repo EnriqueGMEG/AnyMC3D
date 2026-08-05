@@ -113,6 +113,20 @@ def main() -> None:
             "to make recalculation explicit."
         )
     cfg = OmegaConf.load(args.config)
+    roi_policy = (
+        OmegaConf.to_container(cfg.roi, resolve=True)
+        if "roi" in cfg
+        else None
+    )
+    if roi_policy is not None and not isinstance(roi_policy, dict):
+        raise ValueError("preprocessing roi configuration must be a mapping")
+    intensity_config = (
+        OmegaConf.to_container(cfg.intensity, resolve=True)
+        if "intensity" in cfg
+        else {"mode": "hu_window"}
+    )
+    if not isinstance(intensity_config, dict):
+        raise ValueError("preprocessing intensity configuration must be a mapping")
     records = load_records(args)
     if records["patient_id"].astype(str).duplicated().any():
         duplicates = records.loc[
@@ -126,15 +140,9 @@ def main() -> None:
         y=cfg.target_spacing_mm.y,
         z=cfg.target_spacing_mm.z,
         resample_mask_to_ct=bool(cfg.alignment.resample_mask_to_ct),
+        roi_policy=roi_policy,
     )
     LOGGER.info("Resolved target spacing (X,Y,Z): %s", target)
-    roi_policy = (
-        OmegaConf.to_container(cfg.roi, resolve=True)
-        if "roi" in cfg
-        else None
-    )
-    if roi_policy is not None and not isinstance(roi_policy, dict):
-        raise ValueError("preprocessing roi configuration must be a mapping")
     cases = []
     for row in tqdm(
         records.itertuples(index=False),
@@ -146,7 +154,11 @@ def main() -> None:
                 audit_case_geometry(
                     patient_id=str(row.patient_id),
                     ct_path=str(row.ct_path),
-                    pancreas_mask_path=str(row.pancreas_mask_path),
+                    pancreas_mask_path=(
+                        str(row.pancreas_mask_path)
+                        if roi_policy is None or roi_policy.get("mode") != "full_volume"
+                        else None
+                    ),
                     target_spacing_mm=target,
                     crop_margin_mm=tuple(cfg.crop_margin_mm),
                     resample_mask_to_ct=bool(
@@ -170,6 +182,7 @@ def main() -> None:
         overflow_policy=str(cfg.overflow_policy),
         patch_size=int(cfg.patch_size),
         roi_policy=roi_policy,
+        intensity_config=intensity_config,
     )
     write_geometry_outputs(
         config=geometry_config,

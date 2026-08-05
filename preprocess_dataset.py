@@ -73,10 +73,16 @@ def main() -> None:
         if args.overflow_policy_override is not None
         else str(geometry["overflow_policy"])
     )
+    intensity = dict(geometry.get("intensity", {"mode": "hu_window"}))
+    require_mask = bool(geometry.get("mask_required", True))
+    prewindowed_min = float(intensity.get("input_min", 0.0))
+    prewindowed_max = float(intensity.get("input_max", 255.0))
+    intensity_tolerance = float(intensity.get("range_tolerance", 1.0e-3))
     records = load_and_validate_manifest(
         args.manifest,
         check_nifti_geometry=True,
         resample_mask_to_ct=bool(cfg.alignment.resample_mask_to_ct),
+        require_mask=require_mask,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     log_path = args.output_dir / "preprocessing_log.jsonl"
@@ -101,7 +107,7 @@ def main() -> None:
             case = preprocess_case(
                 patient_id=str(row.patient_id),
                 ct_path=row.ct_path,
-                pancreas_mask_path=row.pancreas_mask_path,
+                pancreas_mask_path=getattr(row, "pancreas_mask_path", None),
                 target_spacing_mm=target_spacing,
                 canvas_hw=canvas,
                 crop_margin_mm=geometry["crop_margin_mm"],
@@ -113,6 +119,10 @@ def main() -> None:
                     cfg.alignment.resample_mask_to_ct
                 ),
                 roi_policy=geometry.get("roi_policy"),
+                intensity_mode=str(intensity.get("mode", "hu_window")),
+                prewindowed_min=prewindowed_min,
+                prewindowed_max=prewindowed_max,
+                intensity_range_tolerance=intensity_tolerance,
             )
             _write_npz(output, case)
             case_logs.append(case.log)
@@ -138,13 +148,13 @@ def main() -> None:
         args.output_dir / "patient_geometry.csv", index=False
     )
     run_manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "source_manifest": str(args.manifest.resolve()),
         "geometry_config": str(args.geometry_config.resolve()),
         "num_patients": len(records),
-        "hu_min": float(cfg.hu_min),
-        "hu_max": float(cfg.hu_max),
-        "mask_used_only_for_rectangular_crop": True,
+        "intensity": intensity,
+        "mask_required": require_mask,
+        "mask_used": require_mask,
         "roi_policy": geometry.get("roi_policy"),
         "saved_overflow_policy": str(geometry["overflow_policy"]),
         "effective_overflow_policy": effective_overflow_policy,

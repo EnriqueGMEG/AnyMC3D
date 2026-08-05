@@ -7,7 +7,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from preprocessing.pancreas_crop import canonicalize_pair, compute_mask_bbox
+from preprocessing.pancreas_crop import (
+    canonicalize_ct,
+    canonicalize_pair,
+    compute_mask_bbox,
+)
 
 MANIFEST_COLUMNS = (
     "patient_id",
@@ -23,6 +27,7 @@ def load_and_validate_manifest(
     *,
     check_nifti_geometry: bool = True,
     resample_mask_to_ct: bool = False,
+    require_mask: bool = True,
 ) -> pd.DataFrame:
     """Load the configured CSV and fail on every invalid patient."""
 
@@ -30,12 +35,15 @@ def load_and_validate_manifest(
     if not path.is_file():
         raise FileNotFoundError(f"Manifest not found: {path}")
     frame = pd.read_csv(path)
-    missing = set(MANIFEST_COLUMNS) - set(frame.columns)
+    required_columns = tuple(
+        column for column in MANIFEST_COLUMNS if require_mask or column != "pancreas_mask_path"
+    )
+    missing = set(required_columns) - set(frame.columns)
     if missing:
         raise ValueError(
-            f"Manifest must contain {MANIFEST_COLUMNS}; missing {sorted(missing)}"
+            f"Manifest must contain {required_columns}; missing {sorted(missing)}"
         )
-    frame = frame.loc[:, MANIFEST_COLUMNS].copy()
+    frame = frame.loc[:, required_columns].copy()
     if frame.empty:
         raise ValueError("Manifest contains no patients")
     if frame["patient_id"].isna().any():
@@ -73,7 +81,8 @@ def load_and_validate_manifest(
     frame["fold"] = numeric_folds.astype(int)
 
     base = path.parent
-    for column in ("ct_path", "pancreas_mask_path"):
+    path_columns = ("ct_path", "pancreas_mask_path") if require_mask else ("ct_path",)
+    for column in path_columns:
         resolved = []
         for raw in frame[column]:
             candidate = Path(str(raw))
@@ -87,22 +96,26 @@ def load_and_validate_manifest(
             raise FileNotFoundError(
                 f"patient_id={row.patient_id}: CT not found: {row.ct_path}"
             )
-        if not Path(row.pancreas_mask_path).is_file():
+        if require_mask and not Path(row.pancreas_mask_path).is_file():
             raise FileNotFoundError(
                 f"patient_id={row.patient_id}: mask not found: "
                 f"{row.pancreas_mask_path}"
             )
         if check_nifti_geometry:
             try:
-                _, mask, _, _, _ = canonicalize_pair(
-                    row.ct_path,
-                    row.pancreas_mask_path,
-                    resample_mask_to_ct=resample_mask_to_ct,
-                )
-                compute_mask_bbox(mask.get_fdata(dtype=np.float32))
+                if require_mask:
+                    _, mask, _, _, _ = canonicalize_pair(
+                        row.ct_path,
+                        row.pancreas_mask_path,
+                        resample_mask_to_ct=resample_mask_to_ct,
+                    )
+                    compute_mask_bbox(mask.get_fdata(dtype=np.float32))
+                else:
+                    canonicalize_ct(row.ct_path)
             except Exception as exc:
+                scope = "CT/mask pair" if require_mask else "CT"
                 raise ValueError(
-                    f"patient_id={row.patient_id}: invalid CT/mask pair: {exc}"
+                    f"patient_id={row.patient_id}: invalid {scope}: {exc}"
                 ) from exc
     return frame
 

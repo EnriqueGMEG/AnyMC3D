@@ -1,0 +1,13 @@
+name: pmpd_v2_full_volume
+fold: 1
+
+module:
+  _target_: data_modules.pancreas_metastasis_dataset.PancreasMetastasisDataModule
+  manifest_path: data/pmpd_v2_manifest.csv
+  preprocessed_root: data/pmpd_v2_full_volume_preprocessed
+  fold: ${data.fold}
+  batch_size: 1
+  num_workers: 4
+  augmentation_profile: size_preserving
+  validate_nifti_on_setup: true
+  require_mask: false

@@ -189,6 +189,7 @@ class PancreasMetastasisDataModule(L.LightningDataModule):
         num_workers: int = 4,
         augmentation_profile: str = "size_preserving",
         validate_nifti_on_setup: bool = True,
+        require_mask: bool = True,
     ) -> None:
         super().__init__()
         self.manifest_path = manifest_path
@@ -198,6 +199,7 @@ class PancreasMetastasisDataModule(L.LightningDataModule):
         self.num_workers = int(num_workers)
         self.augmentation_profile = augmentation_profile
         self.validate_nifti_on_setup = bool(validate_nifti_on_setup)
+        self.require_mask = bool(require_mask)
         self.train_records = None
         self.validation_records = None
 
@@ -207,6 +209,7 @@ class PancreasMetastasisDataModule(L.LightningDataModule):
         manifest = load_and_validate_manifest(
             self.manifest_path,
             check_nifti_geometry=self.validate_nifti_on_setup,
+            require_mask=self.require_mask,
         )
         self.train_records, self.validation_records = split_manifest(
             manifest, self.fold

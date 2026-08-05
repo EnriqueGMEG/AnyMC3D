@@ -14,7 +14,7 @@ def preprocess_with_saved_contract(
     *,
     patient_id: str,
     ct_path: str | Path,
-    pancreas_mask_path: str | Path,
+    pancreas_mask_path: str | Path | None,
     geometry_contract: Mapping[str, Any],
     preprocessing_config: DictConfig,
 ) -> PreprocessedCase:
@@ -39,6 +39,8 @@ def preprocess_with_saved_contract(
         raise ValueError(
             f"Saved canvas {canvas} is not divisible by patch size {patch_size}"
         )
+    intensity = dict(geometry_contract.get("intensity", {"mode": "hu_window"}))
+
     return preprocess_case(
         patient_id=patient_id,
         ct_path=ct_path,
@@ -60,4 +62,8 @@ def preprocess_with_saved_contract(
             preprocessing_config.alignment.resample_mask_to_ct
         ),
         roi_policy=geometry_contract.get("roi_policy"),
+        intensity_mode=str(intensity.get("mode", "hu_window")),
+        prewindowed_min=float(intensity.get("input_min", 0.0)),
+        prewindowed_max=float(intensity.get("input_max", 255.0)),
+        intensity_range_tolerance=float(intensity.get("range_tolerance", 1.0e-3)),
     )

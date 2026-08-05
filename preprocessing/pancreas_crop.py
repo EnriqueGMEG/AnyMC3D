@@ -98,6 +98,11 @@ def normalize_roi_policy(
         }
     policy = dict(roi_policy)
     mode = str(policy.get("mode", "all_foreground"))
+    if mode == "full_volume":
+        return {
+            "mode": mode,
+            "source_name": str(policy.get("source_name", "full_volume")),
+        }
     if mode == "all_foreground":
         return {
             "mode": mode,
@@ -156,6 +161,11 @@ def select_crop_roi(
         raise ValueError(f"Invalid voxel spacing: {spacing}")
     voxel_volume_mm3 = float(np.prod(spacing))
     policy = normalize_roi_policy(roi_policy)
+
+    if policy["mode"] == "full_volume":
+        raise ValueError(
+            "full_volume does not select an ROI from a segmentation mask"
+        )
 
     if policy["mode"] == "all_foreground":
         selected = np.asarray(mask_data > 0, dtype=bool)
@@ -351,6 +361,22 @@ def canonicalize_pair(
     return ct, mask, ct_original, mask_original, mask_was_resampled
 
 
+def canonicalize_ct(
+    ct_path: str | Path,
+) -> tuple[nib.spatialimages.SpatialImage, ImageMetadata]:
+    """Load one 3D CT and canonicalize it to RAS without requiring a mask."""
+
+    path = Path(ct_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"CT not found: {path}")
+    raw = nib.load(str(path))
+    original = inspect_image(raw)
+    _shape3(raw)
+    canonical = nib.as_closest_canonical(raw)
+    _shape3(canonical)
+    return canonical, original
+
+
 def compute_mask_bbox(
     mask_data: np.ndarray,
 ) -> tuple[
@@ -466,4 +492,25 @@ def crop_from_mask_roi(
             selection.requested_roi_largest_component_volume_mm3
         ),
         fallback_reason=selection.fallback_reason,
+    )
+
+
+def full_volume_region(
+    ct: nib.spatialimages.SpatialImage,
+) -> CropResult:
+    """Represent the complete canonical CT as an uncropped input region."""
+
+    shape = _shape3(ct)
+    spacing = tuple(float(v) for v in nib.affines.voxel_sizes(ct.affine))
+    bbox = tuple((0, int(size)) for size in shape)
+    return CropResult(
+        image=ct,
+        bbox_original=bbox,
+        margin_mm=(0.0, 0.0, 0.0),
+        margin_voxels=(0, 0, 0),
+        bbox_expanded=bbox,
+        mask_voxel_count=0,
+        roi_source="full_volume",
+        roi_label=None,
+        roi_volume_mm3=float(np.prod(shape) * np.prod(spacing)),
     )
