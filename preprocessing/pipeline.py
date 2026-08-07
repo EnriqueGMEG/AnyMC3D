@@ -10,6 +10,7 @@ import nibabel as nib
 import numpy as np
 
 from .pancreas_crop import (
+    body_region,
     canonicalize_ct,
     canonicalize_pair,
     crop_from_mask_roi,
@@ -67,8 +68,20 @@ def normalize_prewindowed_ct(
     input_min: float = 0.0,
     input_max: float = 255.0,
     range_tolerance: float = 1.0e-3,
-) -> np.ndarray:
-    """Validate an already-windowed CT and scale it once to float32 [0, 1]."""
+    out_of_range_policy: str = "error",
+    max_out_of_range_fraction: float = 0.0,
+    max_out_of_range_magnitude: float = 0.0,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Validate an already-windowed CT and scale it once to float32 [0, 1].
+
+    Some source volumes carry the cohort transfer function without the final
+    clamp, so they exceed the declared range by a small margin. With
+    ``out_of_range_policy='clip'`` such cases are saturated back to the cohort
+    convention, but only while both the affected voxel fraction and the
+    excursion magnitude stay under their configured budgets. A genuinely
+    mis-scaled input, such as a raw HU volume, blows past those budgets and
+    still fails loudly.
+    """
 
     if input_max <= input_min:
         raise ValueError(
@@ -76,22 +89,57 @@ def normalize_prewindowed_ct(
         )
     if range_tolerance < 0:
         raise ValueError("range_tolerance cannot be negative")
+    if out_of_range_policy not in ("error", "clip"):
+        raise ValueError(
+            f"Unknown out_of_range_policy: {out_of_range_policy!r}"
+        )
+    if max_out_of_range_fraction < 0 or max_out_of_range_magnitude < 0:
+        raise ValueError("out-of-range budgets cannot be negative")
     values = np.asarray(data, dtype=np.float32)
     if not np.isfinite(values).all():
         raise ValueError("Prewindowed CT contains NaN or infinite values")
     observed_min = float(values.min())
     observed_max = float(values.max())
-    if (
-        observed_min < input_min - range_tolerance
-        or observed_max > input_max + range_tolerance
-    ):
-        raise ValueError(
+    lower, upper = input_min - range_tolerance, input_max + range_tolerance
+    below = values < lower
+    above = values > upper
+    below_count = int(below.sum())
+    above_count = int(above.sum())
+    total = int(values.size)
+    excursion = max(
+        max(0.0, lower - observed_min), max(0.0, observed_max - upper)
+    )
+    stats: dict[str, Any] = {
+        "out_of_range_policy": out_of_range_policy,
+        "below_min_voxel_fraction": below_count / total,
+        "above_max_voxel_fraction": above_count / total,
+        "out_of_range_voxel_fraction": (below_count + above_count) / total,
+        "max_excursion": excursion,
+        "was_clipped": False,
+    }
+    if below_count or above_count:
+        detail = (
             "Prewindowed CT is outside the declared input range "
             f"[{input_min}, {input_max}]: observed "
             f"[{observed_min}, {observed_max}]"
         )
+        if out_of_range_policy == "error":
+            raise ValueError(detail)
+        fraction = stats["out_of_range_voxel_fraction"]
+        if fraction > max_out_of_range_fraction:
+            raise ValueError(
+                f"{detail}; out-of-range voxel fraction {fraction:.4f} exceeds "
+                f"the budget {max_out_of_range_fraction:.4f}"
+            )
+        if excursion > max_out_of_range_magnitude:
+            raise ValueError(
+                f"{detail}; excursion {excursion:.4f} exceeds the budget "
+                f"{max_out_of_range_magnitude:.4f}"
+            )
+        stats["was_clipped"] = True
     clipped = np.clip(values, input_min, input_max)
-    return ((clipped - input_min) / (input_max - input_min)).astype(np.float32)
+    rescaled = ((clipped - input_min) / (input_max - input_min)).astype(np.float32)
+    return rescaled, stats
 
 
 def normalize_ct_intensity(
@@ -103,17 +151,23 @@ def normalize_ct_intensity(
     prewindowed_min: float = 0.0,
     prewindowed_max: float = 255.0,
     range_tolerance: float = 1.0e-3,
-) -> np.ndarray:
+    out_of_range_policy: str = "error",
+    max_out_of_range_fraction: float = 0.0,
+    max_out_of_range_magnitude: float = 0.0,
+) -> tuple[np.ndarray, dict[str, Any]]:
     """Apply exactly one configured intensity conversion to [0, 1]."""
 
     if mode == "hu_window":
-        return window_ct(data, hu_min=hu_min, hu_max=hu_max)
+        return window_ct(data, hu_min=hu_min, hu_max=hu_max), {}
     if mode == "prewindowed_0_255":
         return normalize_prewindowed_ct(
             data,
             input_min=prewindowed_min,
             input_max=prewindowed_max,
             range_tolerance=range_tolerance,
+            out_of_range_policy=out_of_range_policy,
+            max_out_of_range_fraction=max_out_of_range_fraction,
+            max_out_of_range_magnitude=max_out_of_range_magnitude,
         )
     raise ValueError(f"Unknown intensity mode: {mode}")
 
@@ -254,15 +308,26 @@ def preprocess_case(
     prewindowed_min: float = 0.0,
     prewindowed_max: float = 255.0,
     intensity_range_tolerance: float = 1.0e-3,
+    intensity_out_of_range_policy: str = "error",
+    intensity_max_out_of_range_fraction: float = 0.0,
+    intensity_max_out_of_range_magnitude: float = 0.0,
 ) -> PreprocessedCase:
     """Apply the complete physical-size-preserving pipeline to one patient."""
 
     policy = normalize_roi_policy(roi_policy)
-    if policy["mode"] == "full_volume":
+    if policy["mode"] in ("full_volume", "body"):
         ct, original_ct = canonicalize_ct(ct_path)
         original_mask = None
         mask_resampled = False
-        crop = full_volume_region(ct)
+        if policy["mode"] == "body":
+            crop = body_region(
+                ct,
+                threshold=policy["threshold"],
+                margin_mm=crop_margin_mm,
+                drop_degenerate_slices=policy["drop_degenerate_slices"],
+            )
+        else:
+            crop = full_volume_region(ct)
     else:
         if pancreas_mask_path is None:
             raise ValueError(
@@ -302,7 +367,7 @@ def preprocess_case(
     resampled_span = physical_span_mm(resampled_shape, resampled_spacing)
     data_xyz = resampled.get_fdata(dtype=np.float32)
     observed_intensity_range = [float(data_xyz.min()), float(data_xyz.max())]
-    data_01_xyz = normalize_ct_intensity(
+    data_01_xyz, intensity_stats = normalize_ct_intensity(
         data_xyz,
         mode=intensity_mode,
         hu_min=hu_min,
@@ -310,6 +375,9 @@ def preprocess_case(
         prewindowed_min=prewindowed_min,
         prewindowed_max=prewindowed_max,
         range_tolerance=intensity_range_tolerance,
+        out_of_range_policy=intensity_out_of_range_policy,
+        max_out_of_range_fraction=intensity_max_out_of_range_fraction,
+        max_out_of_range_magnitude=intensity_max_out_of_range_magnitude,
     )
     # NIfTI X,Y,Z -> model S,1,H,W = Z,1,Y,X.
     unpadded = np.transpose(data_01_xyz, (2, 1, 0))[:, np.newaxis, :, :]
@@ -397,6 +465,8 @@ def preprocess_case(
             crop.requested_roi_largest_component_volume_mm3
         ),
         "roi_fallback_reason": crop.fallback_reason,
+        "body_threshold": crop.body_threshold,
+        "degenerate_slice_count": len(crop.degenerate_slice_indices),
         "real_data_fraction_in_plane": real_fraction,
         "padding_fraction_in_plane": 1.0 - real_fraction,
         "num_slices": int(padded.shape[0]),
@@ -441,6 +511,8 @@ def preprocess_case(
             crop.requested_roi_largest_component_volume_mm3
         ),
         "roi_fallback_reason": crop.fallback_reason,
+        "body_threshold": crop.body_threshold,
+        "degenerate_slice_indices": list(crop.degenerate_slice_indices),
         "crop_margin_mm": crop.margin_mm,
         "margin_voxels": crop.margin_voxels,
         "bbox_expanded": crop.bbox_expanded,
@@ -475,8 +547,18 @@ def preprocess_case(
             ),
             "prewindowed_range": [float(prewindowed_min), float(prewindowed_max)],
             "range_tolerance": float(intensity_range_tolerance),
+            **intensity_stats,
         },
-        "warnings": [],
+        "warnings": (
+            [
+                "Prewindowed CT saturated back to "
+                f"[{prewindowed_min}, {prewindowed_max}]: observed "
+                f"{observed_intensity_range}, affected voxel fraction "
+                f"{intensity_stats['out_of_range_voxel_fraction']:.4f}"
+            ]
+            if intensity_stats.get("was_clipped")
+            else []
+        ),
         "errors": [],
     }
     return PreprocessedCase(

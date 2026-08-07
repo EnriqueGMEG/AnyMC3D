@@ -6,11 +6,21 @@ target_spacing_mm:
   z: 2.0
 
 spacing_tolerance_mm: 0.01
+
+# The body bbox is exact: air sits at exactly 0 in these prewindowed volumes,
+# so no margin is needed to avoid shaving skin. A margin would only re-add the
+# background this ROI exists to remove.
 crop_margin_mm: [0.0, 0.0, 0.0]
 
+# Whole CT minus the air around the patient. Unlike the pancreas/tumor ROIs
+# this uses no segmentation, so no mask is required.
 roi:
-  mode: full_volume
-  source_name: full_volume
+  mode: body
+  source_name: body
+  threshold: 0.0
+  # Ten PMPD_v2 cases end in a uniform filler slice (value 0 or 50) carrying no
+  # anatomy. Trimmed from the axial ends here; an interior one raises.
+  drop_degenerate_slices: true
 
 # PMPD_v2 images have already been windowed by the source pipeline.
 # Reference: WW=250, WL=75 -> HU [-49.5, 200.5], scaled to [0, 255].
@@ -19,11 +29,8 @@ intensity:
   input_min: 0.0
   input_max: 255.0
   range_tolerance: 1.0e-3
-  # One PMPD_v2 case (PANGENE_OG:PANCREAS_516) carries the same transfer
-  # function without the final clamp, reaching [-51, 306] over 3.0% of its
-  # voxels; every other case is exactly [0, 255]. Saturating it back to the
-  # cohort convention keeps intensities comparable, while the budgets below
-  # still reject a genuinely mis-scaled volume such as raw HU.
+  # See full_volume_prewindowed_0_255.yaml: PANGENE_OG:PANCREAS_516 carries the
+  # cohort transfer function without the final clamp.
   out_of_range_policy: clip
   max_out_of_range_fraction: 0.05
   max_out_of_range_magnitude: 64.0

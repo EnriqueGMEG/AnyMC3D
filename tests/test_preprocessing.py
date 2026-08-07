@@ -7,11 +7,16 @@ import pytest
 from conftest import write_nifti_pair
 from preprocessing.pancreas_crop import (
     AlignmentError,
+    body_region,
+    canonicalize_ct,
     canonicalize_pair,
     crop_from_pancreas_mask,
+    find_degenerate_slices,
+    normalize_roi_policy,
 )
 from preprocessing.pipeline import (
     compute_symmetric_padding,
+    normalize_prewindowed_ct,
     pad_volume_in_plane,
     preprocess_case,
     window_ct,
@@ -61,6 +66,155 @@ def test_empty_mask_fails(tmp_path):
     ct, mask, *_ = canonicalize_pair(ct_path, mask_path)
     with pytest.raises(ValueError, match="empty"):
         crop_from_pancreas_mask(ct, mask)
+
+
+def _body_ct(tmp_path, name="body", filler=None, filler_index=-1, shape=(40, 40, 10)):
+    """A centered cube of tissue in air, optionally with a constant filler slice."""
+
+    data = np.zeros(shape, dtype=np.float32)
+    data[12:28, 10:30, :] = 120.0
+    if filler is not None:
+        data[:, :, filler_index] = filler
+    path = tmp_path / f"{name}.nii.gz"
+    nib.save(nib.Nifti1Image(data, np.diag([1.0, 1.0, 2.0, 1.0])), path)
+    return path
+
+
+def test_find_degenerate_slices_flags_only_constant_planes():
+    data = np.random.default_rng(0).random((8, 8, 5)).astype(np.float32)
+    data[:, :, 0] = 0.0
+    data[:, :, 3] = 50.0
+    assert find_degenerate_slices(data) == (0, 3)
+    with pytest.raises(ValueError, match="3D volume"):
+        find_degenerate_slices(data[..., 0])
+
+
+def test_body_region_crops_air_and_keeps_every_slice(tmp_path):
+    ct, _ = canonicalize_ct(_body_ct(tmp_path))
+    crop = body_region(ct)
+    assert crop.bbox_original == ((12, 28), (10, 30), (0, 10))
+    assert crop.shape == (16, 20, 10)
+    assert crop.roi_source == "body"
+    assert crop.degenerate_slice_indices == ()
+    # 16x20x10 tissue voxels at 1x1x2 mm, counted rather than approximated
+    # from the projected footprint.
+    assert crop.mask_voxel_count == 16 * 20 * 10
+    assert crop.roi_volume_mm3 == pytest.approx(16 * 20 * 10 * 2.0)
+
+
+def test_body_region_trims_trailing_constant_filler_slice(tmp_path):
+    # Reproduces the 10 PMPD_v2 cases whose last slice is a uniform value.
+    ct, _ = canonicalize_ct(_body_ct(tmp_path, filler=50.0, filler_index=-1))
+    crop = body_region(ct)
+    assert crop.degenerate_slice_indices == (9,)
+    assert crop.bbox_original[2] == (0, 9)
+    assert crop.shape == (16, 20, 9)
+
+
+def test_body_region_keeps_filler_slice_when_disabled(tmp_path):
+    ct, _ = canonicalize_ct(_body_ct(tmp_path, filler=50.0))
+    crop = body_region(ct, drop_degenerate_slices=False)
+    assert crop.degenerate_slice_indices == ()
+    assert crop.shape[2] == 10
+    # The filler spans the whole plane, so it inflates the in-plane bbox.
+    assert crop.shape[:2] == (40, 40)
+
+
+def test_body_region_rejects_interior_constant_slice(tmp_path):
+    ct, _ = canonicalize_ct(_body_ct(tmp_path, filler=50.0, filler_index=5))
+    with pytest.raises(ValueError, match="inside the retained axial range"):
+        body_region(ct)
+
+
+def test_body_region_margin_is_in_plane_only(tmp_path):
+    ct, _ = canonicalize_ct(_body_ct(tmp_path, filler=50.0, filler_index=-1))
+    crop = body_region(ct, margin_mm=(3.0, 3.0, 8.0))
+    # 3 mm at 1 mm spacing widens H/W by three voxels a side...
+    assert crop.shape[:2] == (22, 26)
+    # ...while the axial range stays trimmed, not re-expanded onto the filler.
+    assert crop.shape[2] == 9
+
+
+def test_body_roi_policy_defaults_and_rejects_unknown_mode():
+    policy = normalize_roi_policy({"mode": "body"})
+    assert policy["threshold"] == 0.0
+    assert policy["drop_degenerate_slices"] is True
+    assert policy["source_name"] == "body"
+    with pytest.raises(ValueError, match="Unknown ROI mode"):
+        normalize_roi_policy({"mode": "torso"})
+
+
+def test_body_mode_end_to_end_needs_no_mask(tmp_path):
+    ct_path = _body_ct(tmp_path, shape=(40, 40, 6))
+    case = preprocess_case(
+        patient_id="case",
+        ct_path=ct_path,
+        pancreas_mask_path=None,
+        target_spacing_mm=(1, 1, 2),
+        canvas_hw=(32, 32),
+        crop_margin_mm=(0.0, 0.0, 0.0),
+        roi_policy={"mode": "body", "threshold": 0.0},
+        intensity_mode="prewindowed_0_255",
+        prewindowed_min=0.0,
+        prewindowed_max=255.0,
+    )
+    assert case.volume.shape == (6, 1, 32, 32)
+    assert case.log["roi_source"] == "body"
+    assert case.log["body_threshold"] == 0.0
+    assert case.log["bbox_original"] == ((12, 28), (10, 30), (0, 6))
+
+
+def test_prewindowed_in_range_is_rescaled_without_clipping():
+    values = np.array([0, 51, 255], dtype=np.float32)
+    rescaled, stats = normalize_prewindowed_ct(values)
+    assert np.allclose(rescaled, [0.0, 0.2, 1.0])
+    assert stats["was_clipped"] is False
+    assert stats["out_of_range_voxel_fraction"] == 0.0
+
+
+def test_prewindowed_out_of_range_fails_under_error_policy():
+    values = np.array([-51, 128, 306], dtype=np.float32)
+    with pytest.raises(ValueError, match="outside the declared input range"):
+        normalize_prewindowed_ct(values)
+
+
+def test_prewindowed_out_of_range_saturates_within_budgets():
+    values = np.full(1000, 128.0, dtype=np.float32)
+    values[0] = -51.0
+    values[1] = 306.0
+    rescaled, stats = normalize_prewindowed_ct(
+        values,
+        out_of_range_policy="clip",
+        max_out_of_range_fraction=0.05,
+        max_out_of_range_magnitude=64.0,
+    )
+    assert stats["was_clipped"] is True
+    assert stats["out_of_range_voxel_fraction"] == pytest.approx(0.002)
+    assert stats["max_excursion"] == pytest.approx(51.0, abs=1e-2)
+    assert rescaled.min() == 0.0 and rescaled.max() == 1.0
+
+
+def test_prewindowed_clip_rejects_excess_voxel_fraction():
+    values = np.full(100, 300.0, dtype=np.float32)
+    with pytest.raises(ValueError, match="voxel fraction"):
+        normalize_prewindowed_ct(
+            values,
+            out_of_range_policy="clip",
+            max_out_of_range_fraction=0.05,
+            max_out_of_range_magnitude=64.0,
+        )
+
+
+def test_prewindowed_clip_rejects_raw_hu_volume():
+    values = np.full(1000, 128.0, dtype=np.float32)
+    values[0] = -1024.0
+    with pytest.raises(ValueError, match="excursion"):
+        normalize_prewindowed_ct(
+            values,
+            out_of_range_policy="clip",
+            max_out_of_range_fraction=0.05,
+            max_out_of_range_magnitude=64.0,
+        )
 
 
 def test_hu_window_and_mask_is_not_model_input(tmp_path):

@@ -78,6 +78,13 @@ def main() -> None:
     prewindowed_min = float(intensity.get("input_min", 0.0))
     prewindowed_max = float(intensity.get("input_max", 255.0))
     intensity_tolerance = float(intensity.get("range_tolerance", 1.0e-3))
+    out_of_range_policy = str(intensity.get("out_of_range_policy", "error"))
+    max_out_of_range_fraction = float(
+        intensity.get("max_out_of_range_fraction", 0.0)
+    )
+    max_out_of_range_magnitude = float(
+        intensity.get("max_out_of_range_magnitude", 0.0)
+    )
     records = load_and_validate_manifest(
         args.manifest,
         check_nifti_geometry=True,
@@ -123,6 +130,9 @@ def main() -> None:
                 prewindowed_min=prewindowed_min,
                 prewindowed_max=prewindowed_max,
                 intensity_range_tolerance=intensity_tolerance,
+                intensity_out_of_range_policy=out_of_range_policy,
+                intensity_max_out_of_range_fraction=max_out_of_range_fraction,
+                intensity_max_out_of_range_magnitude=max_out_of_range_magnitude,
             )
             _write_npz(output, case)
             case_logs.append(case.log)
@@ -147,8 +157,20 @@ def main() -> None:
     pd.DataFrame(patient_geometry).to_csv(
         args.output_dir / "patient_geometry.csv", index=False
     )
+    clipped_cases = [
+        entry["patient_id"]
+        for entry in case_logs
+        if entry.get("intensity", {}).get("was_clipped")
+    ]
+    if clipped_cases:
+        LOGGER.warning(
+            "%d case(s) saturated back to the declared intensity range: %s",
+            len(clipped_cases),
+            ", ".join(clipped_cases),
+        )
     run_manifest = {
         "schema_version": 2,
+        "intensity_clipped_patient_ids": clipped_cases,
         "source_manifest": str(args.manifest.resolve()),
         "geometry_config": str(args.geometry_config.resolve()),
         "num_patients": len(records),

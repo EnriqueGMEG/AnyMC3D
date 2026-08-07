@@ -1,0 +1,178 @@
+{
+  "schema_version": 3,
+  "coordinate_convention": {
+    "nifti_array": "X,Y,Z canonical RAS",
+    "model_volume": "S,1,H,W = Z,1,Y,X"
+  },
+  "geometry_uses_classification_labels": false,
+  "roi_uses_segmentation_labels": false,
+  "mask_required": false,
+  "roi_policy": {
+    "mode": "body",
+    "source_name": "body",
+    "threshold": 0.0,
+    "drop_degenerate_slices": true
+  },
+  "intensity": {
+    "mode": "prewindowed_0_255",
+    "input_min": 0.0,
+    "input_max": 255.0,
+    "range_tolerance": 0.001,
+    "out_of_range_policy": "clip",
+    "max_out_of_range_fraction": 0.05,
+    "max_out_of_range_magnitude": 64.0,
+    "source_window_width": 250.0,
+    "source_window_level": 75.0,
+    "source_hu_min": -49.5,
+    "source_hu_max": 200.5
+  },
+  "num_cases": 479,
+  "spacing_mode": "resample_to_common_spacing",
+  "target_spacing_mm": {
+    "x": 0.7820000052452087,
+    "y": 0.7820000052452087,
+    "z": 2.0
+  },
+  "crop_margin_mm": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "patch_size": 16,
+  "canvas_policy": "dataset_max",
+  "canvas_percentile": 99.0,
+  "overflow_policy": "error",
+  "canvas_hw": [
+    544,
+    576
+  ],
+  "distributions": {
+    "H": {
+      "min": 255.0,
+      "median": 398.0,
+      "p95": 461.0,
+      "p99": 487.63999999999965,
+      "p99_5": 498.61,
+      "max": 537.0
+    },
+    "W": {
+      "min": 325.0,
+      "median": 490.0,
+      "p95": 552.0,
+      "p99": 570.22,
+      "p99_5": 571.61,
+      "max": 573.0
+    },
+    "S": {
+      "min": 21.0,
+      "median": 45.0,
+      "p95": 62.0,
+      "p99": 71.43999999999994,
+      "p99_5": 74.61000000000001,
+      "max": 77.0
+    },
+    "spacing_x_original": {
+      "min": 0.33092498779296875,
+      "median": 0.7820000052452087,
+      "p95": 0.9765625,
+      "p99": 0.9765629768371582,
+      "p99_5": 0.9765629768371582,
+      "max": 0.9765629768371582
+    },
+    "spacing_y_original": {
+      "min": 0.33092498779296875,
+      "median": 0.7820000052452087,
+      "p95": 0.9765625,
+      "p99": 0.9765629768371582,
+      "p99_5": 0.9765629768371582,
+      "max": 0.9765629768371582
+    },
+    "spacing_z_original": {
+      "min": 1.9999999999999998,
+      "median": 2.0,
+      "p95": 2.0,
+      "p99": 2.0000000000000266,
+      "p99_5": 2.0000000000000266,
+      "max": 2.0000000000000266
+    }
+  },
+  "canvas_options": {
+    "p95": {
+      "percentile": 95.0,
+      "canvas_hw": [
+        464,
+        560
+      ],
+      "patients_exceeding_canvas": 28,
+      "float32_volume_memory_mib": {
+        "median_slices": 44.6044921875,
+        "p95_slices": 61.455078125,
+        "max_slices": 76.3232421875
+      },
+      "float32_rgb_input_memory_mib": {
+        "median_slices": 133.8134765625,
+        "p95_slices": 184.365234375,
+        "max_slices": 228.9697265625
+      }
+    },
+    "p99": {
+      "percentile": 99.0,
+      "canvas_hw": [
+        496,
+        576
+      ],
+      "patients_exceeding_canvas": 5,
+      "float32_volume_memory_mib": {
+        "median_slices": 49.04296875,
+        "p95_slices": 67.5703125,
+        "max_slices": 83.91796875
+      },
+      "float32_rgb_input_memory_mib": {
+        "median_slices": 147.12890625,
+        "p95_slices": 202.7109375,
+        "max_slices": 251.75390625
+      }
+    },
+    "p99_5": {
+      "percentile": 99.5,
+      "canvas_hw": [
+        512,
+        576
+      ],
+      "patients_exceeding_canvas": 2,
+      "float32_volume_memory_mib": {
+        "median_slices": 50.625,
+        "p95_slices": 69.75,
+        "max_slices": 86.625
+      },
+      "float32_rgb_input_memory_mib": {
+        "median_slices": 151.875,
+        "p95_slices": 209.25,
+        "max_slices": 259.875
+      }
+    },
+    "dataset_max": {
+      "percentile": 100.0,
+      "canvas_hw": [
+        544,
+        576
+      ],
+      "patients_exceeding_canvas": 0,
+      "float32_volume_memory_mib": {
+        "median_slices": 53.7890625,
+        "p95_slices": 74.109375,
+        "max_slices": 92.0390625
+      },
+      "float32_rgb_input_memory_mib": {
+        "median_slices": 161.3671875,
+        "p95_slices": 222.328125,
+        "max_slices": 276.1171875
+      }
+    }
+  },
+  "implementation_decisions": [
+    "Unlike the paper's fixed 432x240x70 T5 input, crops are not resized.",
+    "All real post-crop slices are retained after common-spacing resampling.",
+    "A shared rectangular in-plane canvas is filled by constant padding."
+  ]
+}

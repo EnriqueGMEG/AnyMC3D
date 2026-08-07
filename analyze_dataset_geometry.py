@@ -156,7 +156,8 @@ def main() -> None:
                     ct_path=str(row.ct_path),
                     pancreas_mask_path=(
                         str(row.pancreas_mask_path)
-                        if roi_policy is None or roi_policy.get("mode") != "full_volume"
+                        if roi_policy is None
+                        or roi_policy.get("mode") not in ("full_volume", "body")
                         else None
                     ),
                     target_spacing_mm=target,

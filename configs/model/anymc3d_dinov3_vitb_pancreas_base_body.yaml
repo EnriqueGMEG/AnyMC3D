@@ -5,9 +5,10 @@ model:
   backbone_name: facebook/dinov3-vitb16-pretrain-lvd1689m
   lora_rank: 8
   lora_alpha: 16
-  # Benchmarked on the 640x640 full-volume canvas (RTX 5000 Ada, 32 GB):
-  # chunk 8 is 1.6x faster than chunk 1 at the same 4.7 GiB peak. Checkpointing
-  # stays on: without it the 77-slice worst case runs out of memory, since
+  # Benchmarked on the 640x640 full-volume canvas (RTX 5000 Ada, 32 GB): chunk 8
+  # is 1.6x faster than chunk 1 at the same 4.7 GiB peak. The body canvas is
+  # smaller, so those headroom figures remain conservative here. Checkpointing
+  # stays on: without it the worst-case slice count runs out of memory, since
   # every slice activation is retained for the pooling.
   slice_chunk_size: 8
   gradient_checkpointing: true
@@ -25,7 +26,7 @@ model:
   threshold: 0.5
   threshold_mode: fixed
   fold: ${data.fold}
-  output_dir: outputs/pmpd_v2_vitb_pancreas_base_full_volume_cv
+  output_dir: outputs/pmpd_v2_vitb_pancreas_base_body_cv
 
   max_epochs: 100
   precision: bf16-mixed
@@ -43,4 +44,4 @@ model:
   enable_progress_bar: false
   save_top_k: 1
 
-  run_name: anymc3d-dinov3-vitb-pmpd-v2-pancreas-base-full-volume
+  run_name: anymc3d-dinov3-vitb-pmpd-v2-pancreas-base-body

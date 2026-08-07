@@ -1,0 +1,65 @@
+# @package _global_
+#
+# The body ROI trained with the SAME recipe as the pancreas/tumor crop runs
+# (anymc3d_dinov3_vitb_regularized), so a comparison against them isolates the
+# ROI instead of confounding it with the optimizer settings.
+#
+# The first body run used anymc3d_dinov3_vitb_pancreas_base_body, which inherited
+# an untuned recipe from the full-volume config: focal loss with alpha 0.25 (which
+# down-weights the minority positive class 3x), no head dropout, 3.3x higher
+# learning rates, 10x lower weight decay. Its folds overfitted to train_auroc
+# 0.999 and predicted almost only negatives. Those results are not evidence about
+# the ROI.
+model:
+  _target_: model_arch.pancreas_lightning.PancreasMetastasisLightningModule
+
+  backbone_name: facebook/dinov3-vitb16-pretrain-lvd1689m
+  lora_rank: 8
+  lora_alpha: 16
+
+  # Body-specific: the 544x576 canvas needs checkpointing (the reference recipe
+  # runs it off on a 144x224 canvas, which this variant cannot afford).
+  slice_chunk_size: 8
+  gradient_checkpointing: true
+
+  head_dropout: 0.3
+
+  loss: bce
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  # N_negative/N_positive, computed per fold on the training split only.
+  pos_weight: auto
+
+  lora_lr: 3.0e-5
+  lora_weight_decay: 1.0e-4
+  head_lr: 3.0e-4
+  head_weight_decay: 1.0e-3
+
+  threshold: 0.5
+  threshold_mode: fixed
+  fold: ${data.fold}
+  output_dir: outputs/pmpd_v2_vitb_body_regularized_cv
+
+  # The reference run used patience 150 and trained 151 epochs per fold, which
+  # costs ~13 h per fold on this canvas. Its best checkpoints landed at epochs
+  # 23, 49, 10, 9 and 0, so 60 epochs with patience 40 covers the observed range
+  # at a fraction of the cost. This is the only deliberate departure from the
+  # reference recipe; checkpoint selection is unchanged.
+  max_epochs: 60
+  precision: bf16-mixed
+  seed: 0
+  early_stopping_patience: 40
+  early_stopping_metric: val_pr_auc
+  early_stopping_min_delta: 0.0
+  checkpoint_metric: val_pr_auc
+  additional_checkpoint_metrics: [val_auroc]
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  devices: 1
+  accelerator: auto
+  strategy: auto
+  log_every_n_steps: 10
+  enable_progress_bar: false
+  save_top_k: 1
+
+  run_name: anymc3d-dinov3-vitb-pmpd-v2-body-regularized

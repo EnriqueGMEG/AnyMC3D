@@ -51,6 +51,8 @@ class CropResult:
     requested_roi_largest_component_voxel_count: int = 0
     requested_roi_largest_component_volume_mm3: float = 0.0
     fallback_reason: str | None = None
+    degenerate_slice_indices: tuple[int, ...] = ()
+    body_threshold: float | None = None
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -102,6 +104,14 @@ def normalize_roi_policy(
         return {
             "mode": mode,
             "source_name": str(policy.get("source_name", "full_volume")),
+        }
+    if mode == "body":
+        drop = bool(policy.get("drop_degenerate_slices", True))
+        return {
+            "mode": mode,
+            "source_name": str(policy.get("source_name", "body")),
+            "threshold": float(policy.get("threshold", 0.0)),
+            "drop_degenerate_slices": drop,
         }
     if mode == "all_foreground":
         return {
@@ -424,6 +434,93 @@ def expand_bbox(
     for (lo, hi), margin, size in zip(bbox, margin_voxels, shape):
         expanded.append((max(0, int(lo) - int(margin)), min(int(size), int(hi) + int(margin))))
     return tuple(expanded)  # type: ignore[return-value]
+
+
+def find_degenerate_slices(data: np.ndarray) -> tuple[int, ...]:
+    """Return axial indices whose in-plane content is a single constant value.
+
+    Ten PMPD_v2 exports end in a uniform filler slice (value 0 or 50) that
+    carries no anatomy. It must be found here, on the source grid: in-plane
+    resampling blends such a slice against the constant fill value, which
+    leaves it no longer exactly constant and hides it from later checks.
+    """
+
+    if data.ndim != 3:
+        raise ValueError(f"expected a 3D volume, got shape {data.shape}")
+    return tuple(int(i) for i in np.where(data.std(axis=(0, 1)) == 0)[0])
+
+
+def body_region(
+    ct: nib.spatialimages.SpatialImage,
+    *,
+    threshold: float = 0.0,
+    margin_mm: Sequence[float] = (0.0, 0.0, 0.0),
+    drop_degenerate_slices: bool = True,
+) -> CropResult:
+    """Crop the CT to the in-plane bounding box of the body.
+
+    Air sits at exactly the declared minimum in these prewindowed volumes, so
+    ``> threshold`` isolates the patient without a segmentation. The axial
+    extent is preserved apart from degenerate filler slices trimmed off the
+    ends; an interior one is not something this cohort produces and is raised
+    rather than silently dropped.
+    """
+
+    data = np.asanyarray(ct.dataobj, dtype=np.float32)
+    spacing = tuple(float(v) for v in nib.affines.voxel_sizes(ct.affine))
+    n_slices = int(data.shape[2])
+
+    degenerate = find_degenerate_slices(data) if drop_degenerate_slices else ()
+    z_lo, z_hi = 0, n_slices
+    if degenerate:
+        remaining = [i for i in range(n_slices) if i not in set(degenerate)]
+        if not remaining:
+            raise ValueError("every axial slice is constant; no body to crop")
+        z_lo, z_hi = remaining[0], remaining[-1] + 1
+        interior = [i for i in degenerate if z_lo <= i < z_hi]
+        if interior:
+            raise ValueError(
+                f"constant slices {interior} sit inside the retained axial "
+                f"range [{z_lo}, {z_hi}); only leading/trailing filler slices "
+                "can be trimmed"
+            )
+
+    retained = data[:, :, z_lo:z_hi] > float(threshold)
+    body = np.any(retained, axis=2)
+    if not body.any():
+        raise ValueError(
+            f"no voxel exceeds the body threshold {threshold}; the volume "
+            "looks empty"
+        )
+    xs = np.where(np.any(body, axis=1))[0]
+    ys = np.where(np.any(body, axis=0))[0]
+    bbox = (
+        (int(xs[0]), int(xs[-1]) + 1),
+        (int(ys[0]), int(ys[-1]) + 1),
+        (z_lo, z_hi),
+    )
+
+    margin_tuple = tuple(float(v) for v in margin_mm)
+    margin_voxels = margin_mm_to_voxels(margin_tuple, spacing)
+    # The axial range is already final; a margin there would restore the
+    # filler slices this crop exists to remove.
+    in_plane_margin = (margin_voxels[0], margin_voxels[1], 0)
+    expanded = expand_bbox(bbox, in_plane_margin, ct.shape[:3])
+    cropped = ct.slicer[tuple(slice(lo, hi) for lo, hi in expanded)]
+    voxel_count = int(retained.sum())
+    return CropResult(
+        image=cropped,
+        bbox_original=bbox,
+        margin_mm=margin_tuple,
+        margin_voxels=in_plane_margin,
+        bbox_expanded=expanded,
+        mask_voxel_count=voxel_count,
+        roi_source="body",
+        roi_label=None,
+        roi_volume_mm3=float(voxel_count * np.prod(spacing)),
+        degenerate_slice_indices=degenerate,
+        body_threshold=float(threshold),
+    )
 
 
 def crop_from_pancreas_mask(

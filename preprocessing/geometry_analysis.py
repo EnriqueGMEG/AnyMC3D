@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .pancreas_crop import (
+    body_region,
     canonicalize_ct,
     canonicalize_pair,
     crop_from_mask_roi,
@@ -99,7 +100,7 @@ def resolve_target_spacing(
     policy = normalize_roi_policy(roi_policy)
     spacings: list[tuple[float, float, float]] = []
     for row in records.itertuples(index=False):
-        if policy["mode"] == "full_volume":
+        if policy["mode"] in ("full_volume", "body"):
             ct, _ = canonicalize_ct(row.ct_path)
         else:
             ct, _, _, _, _ = canonicalize_pair(
@@ -135,10 +136,18 @@ def audit_case_geometry(
     """Audit one patient without reading its classification label."""
 
     policy = normalize_roi_policy(roi_policy)
-    if policy["mode"] == "full_volume":
+    if policy["mode"] in ("full_volume", "body"):
         ct, original_ct = canonicalize_ct(ct_path)
         mask_resampled = False
-        crop = full_volume_region(ct)
+        if policy["mode"] == "body":
+            crop = body_region(
+                ct,
+                threshold=policy["threshold"],
+                margin_mm=crop_margin_mm,
+                drop_degenerate_slices=policy["drop_degenerate_slices"],
+            )
+        else:
+            crop = full_volume_region(ct)
         mask_path_value = ""
     else:
         if pancreas_mask_path is None:
@@ -312,8 +321,9 @@ def build_geometry_config(
             "model_volume": "S,1,H,W = Z,1,Y,X",
         },
         "geometry_uses_classification_labels": False,
-        "roi_uses_segmentation_labels": policy["mode"] != "full_volume",
-        "mask_required": policy["mode"] != "full_volume",
+        "roi_uses_segmentation_labels": policy["mode"]
+        not in ("full_volume", "body"),
+        "mask_required": policy["mode"] not in ("full_volume", "body"),
         "roi_policy": policy,
         "intensity": dict(intensity_config or {"mode": "hu_window"}),
         "num_cases": len(cases),

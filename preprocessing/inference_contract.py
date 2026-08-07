@@ -66,4 +66,13 @@ def preprocess_with_saved_contract(
         prewindowed_min=float(intensity.get("input_min", 0.0)),
         prewindowed_max=float(intensity.get("input_max", 255.0)),
         intensity_range_tolerance=float(intensity.get("range_tolerance", 1.0e-3)),
+        intensity_out_of_range_policy=str(
+            intensity.get("out_of_range_policy", "error")
+        ),
+        intensity_max_out_of_range_fraction=float(
+            intensity.get("max_out_of_range_fraction", 0.0)
+        ),
+        intensity_max_out_of_range_magnitude=float(
+            intensity.get("max_out_of_range_magnitude", 0.0)
+        ),
     )
